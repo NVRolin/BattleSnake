@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import gymnasium as gym
 import torch.optim as optim
-import ale_py
 import NN
 import Agent
 device = torch.device('cuda')
@@ -43,7 +42,7 @@ if __name__ == "__main__":
             'eps_min': 0.1,
             'eps_max': 1,
             'n_frames': 4,
-            'times_tested': 1,  # The number to tests we want to execute with these parameters
+            'times_tested': 1,
             'env': env_name,
             'seed': seed
         }
