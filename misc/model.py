@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 import torch.nn.init as init
 class DQNetworkCNN(nn.Module):
     # Create a feedforward neural network. Class contains two functions:
@@ -9,21 +10,23 @@ class DQNetworkCNN(nn.Module):
         self.__device = device  # cuda or cpu
         self.__input_size = input_size
         self.__output_size = output_size
-
         self.__hidden_size = hidden_size
 
         self.__c1_block = nn.Sequential(
-            nn.Conv2d(self.__input_size, 32, 8, stride=4),
+            # 11×11 → 11×11
+            nn.Conv2d(self.__input_size, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2),
+
+            # 11×11 → 11×11
+            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 64, 3, stride=1),
-            nn.ReLU()
-            # nn.MaxPool2d(kernel_size=2,stride=2) # takes te maximum value,
-            # used to reduce the number of parameters learned and helps avoid overfitting by providing a abstracted form.
+
+            # (optionally) downsample to e.g. 5×5
+            nn.Conv2d(64, 128, kernel_size=2, stride=2, padding=1),
+            nn.ReLU(),
         )
 
-        FC_size = 3136  # The input size to the fully connected network
+        FC_size = self._get_conv_out(self.__input_size)
 
         self.__FC_block = nn.Sequential(
             # nn.Flatten(), #Flatten into single vector
@@ -50,6 +53,11 @@ class DQNetworkCNN(nn.Module):
         x = self.__FC_block(x.view(x.size(0), -1))
         return x
 
+    def _get_conv_out(self, in_channels):
+        # run a dummy 11×11 through conv block to get flatten size
+        x = torch.zeros(1, in_channels, 11, 11)
+        x = self.__c1_block(x)
+        return int(x.numel())
     def get_device(self):
         return self.__device
 

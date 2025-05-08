@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+
+from misc.train import spaceInvaders
+
 print("Torch version:",torch.__version__)
 from tqdm import trange
 import torch.optim as optim
@@ -8,9 +11,9 @@ import json
 from datetime import datetime
 import numpy as np
 import copy
-import ReplayBuffer
-import NN
-import Draw
+import replayBuffer
+import model
+import draw
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter("runs/DQN")
 class Agent(object):
@@ -71,7 +74,7 @@ class DQNAgent(Agent):
     def __init__(self, discount_factor, buffer_size, neural_network, optimizer, n_actions, n_frames):
         super(DQNAgent, self).__init__(n_actions)
 
-        self.__experience_replay_buffer = ReplayBuffer.ExperienceReplayBuffer(capacity=buffer_size)  # init the exp replay buffer
+        self.__experience_replay_buffer = replayBuffer.ExperienceReplayBuffer(capacity=buffer_size)  # init the exp replay buffer
         self.__n_frames = n_frames
         self.__steps = 0
         self.__total_steps = 0
@@ -195,7 +198,6 @@ class DQNAgent(Agent):
         loss = self.__loss(state_action_values.view(-1), target_values.detach())
         # loss = self.__loss(state_action_values, target_values.unsqueeze(1))
         loss.backward()  # Computes the gradient of the loss tensor.
-
         ret_loss = loss.cpu().detach()  # We return the loss for plotting purposes
         torch.nn.utils.clip_grad_norm_(self.__nn.parameters(),
                                        1)  # We clip the gradient to avoid the exploding gradient phenomenon.
@@ -215,12 +217,17 @@ class DQNAgent(Agent):
         # Note that in order to start training i.e. finding Q values you need a filled buffer
         # but you cannot fill a buffer without Q values (which actions to take?)
         # so instead, you can fill it initially by choosing uniformly random actions
-        state = env.reset()[0]  # you start new episode by using env.reset, and the function returns initial state
+        if spaceInvaders:
+            state = env.reset()[0]  # you start new episode by using env.reset, and the function returns initial state
+        else:
+            env.reset()
+            state = env.get_observation()
+            state = state["board"]
         state = self.__process(state)  # Preprocess the input
         done = False
         reward = 0
         action_for_frames = 0
-        stacked_state, reward, done = self.__stack_frames(env, state, action_for_frames, reward,
+        stacked_state, reward, done,_ = self.__stack_frames(env, state, action_for_frames, reward,
                                                           done)  # stack first frames
         print("Filling buffer...")
         for i in range(self.__experience_replay_buffer.get_capacity()):
@@ -232,56 +239,82 @@ class DQNAgent(Agent):
             # We stack the frame with the action for the current state.
             # The method will append frames for the first frames in a episode
             # Next state
-            next_state, reward, terminal, truncated, _ = env.step(action_for_frames)
-            done = terminal or truncated
+            if spaceInvaders:
+                next_state, reward, terminal, truncated, _ = env.step(action_for_frames)
+                done = terminal or truncated
+            else:
+                next_state, reward, terminal, _ = env.step([action_for_frames])
+                next_state = next_state["board"]
+                reward = reward[0]
+                done = terminal
             if done:
                 stacked_next_state = stacked_state
             else:
                 # next state processing
                 next_state = self.__process(next_state)
-                stacked_next_state, reward, done = self.__stack_frames(env, next_state, action_for_frames, reward, done)
+                stacked_next_state, reward, done, _= self.__stack_frames(env, next_state, action_for_frames, reward, done)
                 # if not ended, next state becomes current
             reward_tensor = torch.tensor([reward], dtype=torch.uint8, requires_grad=False)
             action_for_frames_tensor = torch.tensor([action_for_frames], dtype=torch.uint8, requires_grad=False)
             done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
 
             # Form Experience tuple from state, action, reward, next_state, done, and append it to the buffer
-            exp = ReplayBuffer.Experience(stacked_state.detach(), action_for_frames_tensor.detach(), reward_tensor.detach(),
+            exp = replayBuffer.Experience(stacked_state.detach(), action_for_frames_tensor.detach(), reward_tensor.detach(),
                                           stacked_next_state.detach(), done_tensor.detach())
             self.__experience_replay_buffer.append(exp)
             if done:
-                state = env.reset()[0]
+                if spaceInvaders:
+                    state = env.reset()[0]
+                else:
+                    env.reset()
+                    state = env.get_observation()
+                    state = state["board"]
                 state = self.__process(state)
                 done = False
                 reward = 0
                 action_for_frames = 0
-                stacked_state, reward, done = self.__stack_frames(env, state, action_for_frames, reward, done)
+                stacked_state, reward, done, _ = self.__stack_frames(env, state, action_for_frames, reward, done)
             else:
                 stacked_state = stacked_next_state
         print("Buffer filled!")
     def __process(self, state):
         # state = rescale(state, scale=0.5)
-        state = state[np.newaxis, np.newaxis, :, :]
+        if spaceInvaders:
+            state = state[np.newaxis, np.newaxis, :, :]
 
-        state = torch.tensor(np.array(state), dtype=torch.torch.uint8, requires_grad=False)
+            state = torch.tensor(np.array(state), dtype=torch.uint8, requires_grad=False)
 
-        # state_tensor2 = state_tensor2[..., 0]
-        # state_tensor2 = state_tensor2.unsqueeze(0)
-        # print(state_tensor2.size())
+            # state_tensor2 = state_tensor2[..., 0]
+            # state_tensor2 = state_tensor2.unsqueeze(0)
+            # print(state_tensor2.size())
+        else:
+            state = state[np.newaxis, np.newaxis, :, :]
+            state = torch.tensor(np.array(state), dtype=torch.uint8, requires_grad=False)
+            # state_tensor2 = state_tensor2[..., 0]
+            # state_tensor2 = state_tensor2.unsqueeze(0)
+            # print(state_tensor2.size())
         return state
 
-    def __stack_frames(self, env, current_state, current_action, tot_reward, done):
+    def __stack_frames(self, env, current_state, current_action, tot_reward, done,info ={}):
         # wrapper_args_no_frameskip = self.__params_used['wrapper_args'].copy()  # Create a copy to avoid modifying the original dictionary
         # wrapper_args_no_frameskip['frame_skip'] = 1  # Update frame_skip value
         # If we are done at the start of a stack stack the done frame
         while current_state.size()[1] < self.__n_frames:
             if not done:
                 # new_frame, reward, terminal, truncated, _ = gym.wrappers.AtariPreprocessing(env.unwrapped, **wrapper_args_no_frameskip).step(current_action)
-                new_frame, reward, terminal, truncated, _ = env.step(current_action)
+                if spaceInvaders:
+                    new_frame, reward, terminal, truncated, info = env.step(current_action)
+                else:
+                    new_frame, reward, terminal, info = env.step([current_action])
+                    reward = reward[0]
+                    new_frame = new_frame['board']
                 self.__steps += 1
                 self.__total_steps += 1
                 tot_reward += reward
-                done = terminal or truncated
+                if spaceInvaders:
+                    done = terminal or truncated
+                else:
+                    done = terminal
                 if done:
                     new_frame = np.array(current_state.squeeze(0)[0].cpu())
                 new_frame_tensor = self.__process(new_frame)
@@ -290,7 +323,7 @@ class DQNAgent(Agent):
                 # plt.imshow(new_frame)
                 # plt.show()
                 current_state = torch.cat([current_state, new_frame_tensor], 1)
-        return current_state, tot_reward, done
+        return current_state, tot_reward, done,info
 
     def __running_average(self, x, N):
         # Function used to compute the running average of the last N elements of a vector x
@@ -348,7 +381,10 @@ class DQNAgent(Agent):
         self.__params_used['eps_min'] = hyperparams['eps_min']
         self.__params_used['eps_max'] = hyperparams['eps_max']
         self.__params_used['wrapper_args'] = wrapper_args
-        self.__params_used['env_name'] = env.spec.id
+        if spaceInvaders:
+            self.__params_used['env_name'] = env.spec.id
+        else:
+            self.__params_used['env_name'] = env.NAME
 
     def __train_with_episodes(self, n_episodes, n_ep_running_average, target_network_update_freq,
                               batch_size, eps_min, eps_max, env):
@@ -436,7 +472,11 @@ class DQNAgent(Agent):
     def __run_episode(self, env, epsilon, target_network_update_freq, batch_size):
         """Run a single training episode and return stats."""
         # Reset environment
-        state = env.reset()[0]
+        if spaceInvaders:
+            state = env.reset()[0]
+        else:
+            state = env.reset()
+            state = state["board"]
         state = self.__process(state)
 
         # Initialize episode variables
@@ -448,7 +488,7 @@ class DQNAgent(Agent):
         loss = None
 
         # Stack initial frames
-        stacked_next_state, reward, done = self.__stack_frames(env, state, next_action, reward, done)
+        stacked_next_state, reward, done,_ = self.__stack_frames(env, state, next_action, reward, done)
 
         # Episode loop
         while not done:
@@ -457,19 +497,24 @@ class DQNAgent(Agent):
 
             # Choose action using epsilon-greedy policy
             next_action = self._forward(stacked_state, epsilon)
-
             # Take action in environment
             if done:  # Will never happen
                 stacked_next_state = stacked_state
             else:
                 # Get next state and reward. What are terminal and truncated? If episode ended.
-                next_state, reward, terminal_next_state, truncated_next_state, _ = env.step(next_action)
-                done = terminal_next_state or truncated_next_state
+                if spaceInvaders:
+                    next_state, reward, terminal_next_state, truncated_next_state, _ = env.step(next_action)
+                    done = terminal_next_state or truncated_next_state
+                else:
+                    next_state, reward, terminal_next_state, _ = env.step([next_action])
+                    next_state = next_state["board"]
+                    reward = reward[0]
+                    done = terminal_next_state
                 if done:
                     stacked_next_state = stacked_state
                 else:
                     next_state = self.__process(next_state)
-                    stacked_next_state, reward, done = self.__stack_frames(env, next_state, next_action, reward,
+                    stacked_next_state, reward, done,_ = self.__stack_frames(env, next_state, next_action, reward,
                                                                            done)
             # Update counters and rewards
             total_episode_reward += reward
@@ -501,7 +546,7 @@ class DQNAgent(Agent):
         action_tensor = torch.tensor([action], dtype=torch.uint8, requires_grad=False)
         done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
 
-        exp = ReplayBuffer.Experience(state.detach(), action_tensor.detach(),
+        exp = replayBuffer.Experience(state.detach(), action_tensor.detach(),
                                       reward_tensor.detach(), next_state.detach(),
                                       done_tensor.detach())
         self.__experience_replay_buffer.append(exp)
@@ -552,14 +597,18 @@ class DQNAgent(Agent):
         writer.close()
         self.__params_used['total_steps'] = self.__total_steps
         self.__experience_replay_buffer.clear_memory()
-        env.close()
+        if spaceInvaders:
+            env.close()
 
 
 
-    def _forward_processing(self, env, state, action, reward, done):
+    def _forward_processing(self, env, state, action, reward, done,info={}):
+        info_next_state = {}
+        if not spaceInvaders:
+            state = state["board"]
         if not torch.is_tensor(state):
             state = self.__process(state)
-        stacked_state, reward, done = self.__stack_frames(env, state, action, reward, done)
+        stacked_state, reward, done,info = self.__stack_frames(env, state, action, reward, done,info)
         action = self._forward(stacked_state, 0)
         if done:
             stacked_next_state = stacked_state
@@ -567,23 +616,29 @@ class DQNAgent(Agent):
             done_next_state = done
         else:
             # Get next state and reward. What are terminal and truncated? If episode ended.
-            next_state, reward_next_state, terminal_next_state, truncated_next_state, _ = env.step(action)
-            done_next_state = terminal_next_state or truncated_next_state
+            if spaceInvaders:
+                next_state, reward_next_state, terminal_next_state, truncated_next_state, info_next_state = env.step(action)
+                done_next_state = terminal_next_state or truncated_next_state
+            else:
+                next_state, reward_next_state, terminal_next_state, info_next_state = env.step([action])
+                next_state = next_state["board"]
+                reward_next_state = reward_next_state[0]
+                done_next_state = terminal_next_state
             if done_next_state:
                 stacked_next_state = stacked_state
                 reward_next_state = reward
                 done_next_state = done_next_state
             else:
                 next_state = self.__process(next_state)
-                stacked_next_state, reward_next_state, done_next_state = self.__stack_frames(env, next_state, action,
+                stacked_next_state, reward_next_state, done_next_state,info_next_state = self.__stack_frames(env, next_state, action,
                                                                                              reward_next_state,
-                                                                                             done_next_state)
+                                                                                             done_next_state,info_next_state)
                 reward_next_state += reward
         # Append the next state to the stack of frames.
         # stacked_next_state = torch.cat([stacked_state, next_state], 1)
         # Remove the oldest frame so that we have a correct frame count.
         # stacked_next_state = stacked_next_state[:, 1:, :, :]
-        return env, stacked_next_state, action, reward_next_state, done_next_state
+        return env, stacked_next_state, action, reward_next_state, done_next_state,info_next_state
 
     def test_policy(self, env1, n_episodes=50, dual=True, env2=None):
         if dual is True:
@@ -598,7 +653,10 @@ class DQNAgent(Agent):
         Rewards = []
         try:
             for i in range(n_episodes):
-                draw_env = Draw.DrawEnvironment(env1, dual, env2=env2)
+                if spaceInvaders:
+                    draw_env = draw.DrawEnvironment(env1, dual, env2=env2)
+                else:
+                    draw_env = draw.DrawBattlesnakeEnvironment(env1, dual, env2=env2)
                 if dual is True:
                     Rewards.append(draw_env.run(self, random_agent)[0][0])
                 else:
@@ -705,7 +763,7 @@ class DQNAgent(Agent):
         if self.__params_used['device'] == "cuda":  # test i we can run cuda, if not we use cpu
             print("Is CUDA enabled?", torch.cuda.is_available())
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        main_network = NN.DQNetworkCNN(self.__params_used['output_size'], self.__params_used['input_size'],
+        main_network = model.DQNetworkCNN(self.__params_used['output_size'], self.__params_used['input_size'],
                                        self.__params_used['hidden_size'], device)
         main_network = main_network.to(main_network.get_device())  # Move main network to Device
         print("Using: " + str(main_network.get_device()))
