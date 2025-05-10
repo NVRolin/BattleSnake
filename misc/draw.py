@@ -105,7 +105,7 @@ class DrawBattlesnakeEnvironment:
 
     def __update(self, agent1, agent2):
         if not self.done1:
-            self.renderer1.render(self.env1.get_observation(), self.info1, fps=1)
+            self.renderer1.render(self.env1.get_observation(), self.info1, fps=10)
 
             self.env1, self.obs1, self.action1, self.reward1, self.done1,self.info1 = agent1._forward_processing(
                 self.env1, self.env1.get_observation(), self.action1, self.reward1, self.done1,self.info1)
@@ -114,7 +114,7 @@ class DrawBattlesnakeEnvironment:
 
         if self.dual and not self.done2:
             # Get observation and info from second environment state
-            self.renderer2.render(self.env2.get_observation(), self.info2, fps=1)
+            self.renderer2.render(self.env2.get_observation(), self.info2, fps=10)
 
             self.env2, self.obs2, self.action2, self.reward2, self.done2,self.info2 = agent2._forward_processing(
                 self.env2, self.env2.get_observation(), self.action2, self.reward2, self.done2,self.info2)

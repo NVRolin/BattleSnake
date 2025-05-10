@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from matplotlib import pyplot as plt
+from pygments.styles.dracula import foreground
 
 from misc.train import spaceInvaders
 
@@ -131,7 +133,7 @@ class DQNAgent(Agent):
             self.__last_action = np.random.randint(self._n_actions)
         else:  # greedy action
             # with profiler.profile(with_stack=True, profile_memory=True) as PROF:
-            state = state.detach().to(self.__nn.get_device(), dtype=torch.float) / 255
+            state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
             q_values = self.__nn(state)
             # writer.add_graph(self.__nn, state)
             # writer.close()
@@ -145,7 +147,7 @@ class DQNAgent(Agent):
     @torch.no_grad()
     def _forwardBoltz(self, state, tau):
         # boltzman
-        state = state.detach().to(self.__nn.get_device(), dtype=torch.float) / 255
+        state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
         q_values = self.__nn(state).cpu().numpy()[0]
         max_q_value = np.max(q_values)
         exp_prob = np.exp((q_values - max_q_value) / tau)
@@ -164,21 +166,26 @@ class DQNAgent(Agent):
 
         state, action, reward, next_state, done = self.__experience_replay_buffer.sample_batch(
             N)  # take N samples from the buffer
-        state = state.to(self.__nn.get_device(), dtype=torch.float) / 255
+        state = state.to(self.__nn.get_device(), dtype=torch.float32) / 255.0
         action = action.to(self.__nn.get_device(), dtype=torch.int64)
-        reward = reward.to(self.__nn.get_device(), dtype=torch.float)
-        next_state = next_state.to(self.__nn.get_device(), dtype=torch.float) / 255
+        reward = reward.to(self.__nn.get_device(), dtype=torch.int64)
+        next_state = next_state.to(self.__nn.get_device(), dtype=torch.float32) / 255.0
         done = done.to(self.__nn.get_device())
         # We want to get the maximum along the second dimension of the tensor, and [0] accesses the value not the indices of the tensor.
-        # for i in range(len(reward)):
-        #    if done[i]:
-        #        print(reward[i])
-        #        print(done)
-        #        plt.imshow(np.array(state.squeeze(0)[i][0].cpu()))
-        #        plt.show()
-        #        plt.imshow(np.array(next_state.squeeze(0)[i][0].cpu()))
-        #        plt.show()
+        """for i in range(len(reward)):
+            if done[i]:
+                ACTION_NAMES = ['up', 'down', 'left', 'right']
+                print(done[i],ACTION_NAMES[action[i].item()], reward[i].item())
+                for frame_idx in range(state.size(1)):  # Iterate through all frames in the stacked state
+                    plt.imshow(np.array(state.squeeze(0)[i][frame_idx].cpu()))
+                    plt.title(f"State Frame {frame_idx}")
+                    plt.show()
+                for frame_idx in range(next_state.size(1)):  # Iterate through all frames in the stacked next state
+                    plt.imshow(np.array(next_state.squeeze(0)[i][frame_idx].cpu()))
+                    plt.title(f"Next State Frame {frame_idx}")
+                    plt.show()"""
         with torch.no_grad():  # Detach qvalues_next_state from the computation graph
+            """print(next_state.shape)"""
             qvalues_next_state = self.__target_nn(next_state).max(dim=1)[0]
 
         # We want to get the state action values from the neural network
@@ -227,7 +234,7 @@ class DQNAgent(Agent):
         done = False
         reward = 0
         action_for_frames = 0
-        stacked_state, reward, done,_ = self.__stack_frames(env, state, action_for_frames, reward,
+        stacked_state,action_for_frames, reward, done,_ = self.__stack_frames(env, state, action_for_frames, reward,
                                                           done)  # stack first frames
         print("Filling buffer...")
         for i in range(self.__experience_replay_buffer.get_capacity()):
@@ -252,10 +259,10 @@ class DQNAgent(Agent):
             else:
                 # next state processing
                 next_state = self.__process(next_state)
-                stacked_next_state, reward, done, _= self.__stack_frames(env, next_state, action_for_frames, reward, done)
+                stacked_next_state,action_for_frames, reward, done, _= self.__stack_frames(env, next_state, action_for_frames, reward, done)
                 # if not ended, next state becomes current
-            reward_tensor = torch.tensor([reward], dtype=torch.uint8, requires_grad=False)
-            action_for_frames_tensor = torch.tensor([action_for_frames], dtype=torch.uint8, requires_grad=False)
+            reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False)
+            action_for_frames_tensor = torch.tensor([action_for_frames], dtype=torch.int64, requires_grad=False)
             done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
 
             # Form Experience tuple from state, action, reward, next_state, done, and append it to the buffer
@@ -273,7 +280,7 @@ class DQNAgent(Agent):
                 done = False
                 reward = 0
                 action_for_frames = 0
-                stacked_state, reward, done, _ = self.__stack_frames(env, state, action_for_frames, reward, done)
+                stacked_state,action_for_frames, reward, done, _ = self.__stack_frames(env, state, action_for_frames, reward, done)
             else:
                 stacked_state = stacked_next_state
         print("Buffer filled!")
@@ -296,34 +303,121 @@ class DQNAgent(Agent):
         return state
 
     def __stack_frames(self, env, current_state, current_action, tot_reward, done,info ={}):
-        # wrapper_args_no_frameskip = self.__params_used['wrapper_args'].copy()  # Create a copy to avoid modifying the original dictionary
-        # wrapper_args_no_frameskip['frame_skip'] = 1  # Update frame_skip value
-        # If we are done at the start of a stack stack the done frame
-        while current_state.size()[1] < self.__n_frames:
-            if not done:
-                # new_frame, reward, terminal, truncated, _ = gym.wrappers.AtariPreprocessing(env.unwrapped, **wrapper_args_no_frameskip).step(current_action)
-                if spaceInvaders:
-                    new_frame, reward, terminal, truncated, info = env.step(current_action)
-                else:
-                    new_frame, reward, terminal, info = env.step([current_action])
-                    reward = reward[0]
-                    new_frame = new_frame['board']
-                self.__steps += 1
-                self.__total_steps += 1
-                tot_reward += reward
-                if spaceInvaders:
-                    done = terminal or truncated
-                else:
-                    done = terminal
-                if done:
-                    new_frame = np.array(current_state.squeeze(0)[0].cpu())
-                new_frame_tensor = self.__process(new_frame)
-                current_state = torch.cat([current_state, new_frame_tensor], 1)
+        # Battlesnake stackinng of frames inspired by https://medium.com/asymptoticlabs/battlesnake-post-mortem-a5917f9a3428
+        if not spaceInvaders:
+            B = env.board_size
+            direction = None
+            # Create frame with health at head
+            health_frame = np.zeros((B, B), dtype=np.uint8)
+            bin_body_frame = np.zeros((B, B), dtype=np.uint8)
+            segment_body_frame = np.zeros((B, B), dtype=np.uint8)
+            longer_opponent_frame = np.zeros((B, B), dtype=np.uint8)
+            food_frame = np.zeros((B, B), dtype=np.uint8)
+            board_frame = np.full((B, B), 255, dtype=np.uint8)
+            agent_head_frame = np.zeros((B, B), dtype=np.uint8)
+            double_tail_frame = np.zeros((B, B), dtype=np.uint8)
+            longer_size_frame = np.zeros((B, B), dtype=np.uint8)
+            shorter_size_frame = np.zeros((B, B), dtype=np.uint8)
+            obs = env.get_observation()
+            for i in range(len(obs['snakes'])):
+                snake = obs['snakes'][i]
+                head_x, head_y = snake[0]
+                health = obs['health'][i]
+                health_frame[head_y, head_x] = health * 255 // 100
+                for j in range(len(snake)):
+                    x, y = snake[j]
+                    bin_body_frame[y, x] = 255
+                    segment_body_frame[y, x] = j
+                    if len(snake) > len(obs['snakes'][0]):
+                        longer_size_frame[y, x] = len(snake)-len(obs['snakes'][0])
+                    elif len(snake) < len(obs['snakes'][0]):
+                        shorter_size_frame[y, x] = len(obs['snakes'][0])-len(snake)
+                if len(snake) > len(obs['snakes'][0]):
+                    longer_opponent_frame[head_y, head_x] = 255
+                if obs['food_eaten'][i]:
+                    double_tail_x, double_tail_y = snake[-1]
+                    double_tail_frame[double_tail_y, double_tail_x] = 255
+            for x, y in obs['food']:
+                food_frame[y, x] = 255
+            head_x, head_y = obs['snakes'][0][0]
+            if len(obs['snakes'][0]) > 1:
+                neck_x, neck_y = obs['snakes'][0][1]
             else:
-                # plt.imshow(new_frame)
-                # plt.show()
-                current_state = torch.cat([current_state, new_frame_tensor], 1)
-        return current_state, tot_reward, done,info
+                neck_x, neck_y = obs['snakes'][0][0]
+            if neck_x < head_x:
+                direction = "right"
+            elif neck_x > head_x:
+                direction = "left"
+            elif neck_y < head_y:
+                direction = "down"
+            elif neck_y > head_y:
+                direction = "up"
+            else:
+                direction = "up"
+            agent_head_frame[head_y, head_x] = 255
+            alive_flags = obs['alive']
+            alive_count = sum(alive_flags)
+            other_alive = alive_count - 1
+            idx = max(0, min(other_alive, 3))
+            alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)
+            alive_count_frames[idx, :, :] = 255
+
+            all_frames = np.stack([
+                health_frame,
+                bin_body_frame,
+                segment_body_frame,
+                longer_opponent_frame,
+                food_frame,
+                board_frame,
+                agent_head_frame,
+                double_tail_frame,
+                longer_size_frame,
+                shorter_size_frame,
+                *alive_count_frames
+            ], axis=0)
+            # We want to always face up to reduce state space
+            """if direction == "right":
+                all_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
+                current_action = (current_action + 3) % 4
+            elif direction == "left":
+                all_frames = np.rot90(all_frames, k=1,axes=(1, 2)).copy()
+                current_action = (current_action + 1) % 4
+            elif direction == "down":
+                all_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
+                current_action = (current_action + 2) % 4"""
+            current_state = torch.from_numpy(all_frames)
+            current_state = current_state[np.newaxis, :, :, :]
+
+            return current_state, current_action,tot_reward, done,info
+        else:
+            # wrapper_args_no_frameskip = self.__params_used['wrapper_args'].copy()  # Create a copy to avoid modifying the original dictionary
+            # wrapper_args_no_frameskip['frame_skip'] = 1  # Update frame_skip value
+            # If we are done at the start of a stack stack the done frame
+            while current_state.size()[1] < self.__n_frames:
+                if not done:
+                    # new_frame, reward, terminal, truncated, _ = gym.wrappers.AtariPreprocessing(env.unwrapped, **wrapper_args_no_frameskip).step(current_action)
+                    if spaceInvaders:
+                        new_frame, reward, terminal, truncated, info = env.step(current_action)
+                    else:
+                        new_frame, reward, terminal, info = env.step([current_action])
+                        reward = reward[0]
+                        new_frame = new_frame['board']
+                    self.__steps += 1
+                    self.__total_steps += 1
+                    tot_reward += reward
+                    if spaceInvaders:
+                        done = terminal or truncated
+                    else:
+                        done = terminal
+                    if done:
+                        new_frame = np.array(current_state.squeeze(0)[0].cpu())
+                    new_frame_tensor = self.__process(new_frame)
+                    current_state = torch.cat([current_state, new_frame_tensor], 1)
+                else:
+                    # plt.imshow(new_frame)
+                    # plt.show()
+                    current_state = torch.cat([current_state, new_frame_tensor], 1)
+            return current_state, current_action,tot_reward, done,info
 
     def __running_average(self, x, N):
         # Function used to compute the running average of the last N elements of a vector x
@@ -488,7 +582,7 @@ class DQNAgent(Agent):
         loss = None
 
         # Stack initial frames
-        stacked_next_state, reward, done,_ = self.__stack_frames(env, state, next_action, reward, done)
+        stacked_next_state,next_action, reward, done,_ = self.__stack_frames(env, state, next_action, reward, done)
 
         # Episode loop
         while not done:
@@ -514,7 +608,7 @@ class DQNAgent(Agent):
                     stacked_next_state = stacked_state
                 else:
                     next_state = self.__process(next_state)
-                    stacked_next_state, reward, done,_ = self.__stack_frames(env, next_state, next_action, reward,
+                    stacked_next_state,next_action, reward, done,_ = self.__stack_frames(env, next_state, next_action, reward,
                                                                            done)
             # Update counters and rewards
             total_episode_reward += reward
@@ -542,8 +636,8 @@ class DQNAgent(Agent):
 
     def __store_experience(self, state, action, reward, next_state, done):
         """Store an experience tuple in the replay buffer."""
-        reward_tensor = torch.tensor([reward], dtype=torch.uint8, requires_grad=False)
-        action_tensor = torch.tensor([action], dtype=torch.uint8, requires_grad=False)
+        reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False)
+        action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False)
         done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
 
         exp = replayBuffer.Experience(state.detach(), action_tensor.detach(),
@@ -608,7 +702,7 @@ class DQNAgent(Agent):
             state = state["board"]
         if not torch.is_tensor(state):
             state = self.__process(state)
-        stacked_state, reward, done,info = self.__stack_frames(env, state, action, reward, done,info)
+        stacked_state,action, reward, done,info = self.__stack_frames(env, state, action, reward, done,info)
         action = self._forward(stacked_state, 0)
         if done:
             stacked_next_state = stacked_state
@@ -630,7 +724,7 @@ class DQNAgent(Agent):
                 done_next_state = done_next_state
             else:
                 next_state = self.__process(next_state)
-                stacked_next_state, reward_next_state, done_next_state,info_next_state = self.__stack_frames(env, next_state, action,
+                stacked_next_state,action, reward_next_state, done_next_state,info_next_state = self.__stack_frames(env, next_state, action,
                                                                                              reward_next_state,
                                                                                              done_next_state,info_next_state)
                 reward_next_state += reward
@@ -756,8 +850,10 @@ class DQNAgent(Agent):
             self.__params_used = json.load(f)
         print(self.__params_used)
         # Init the model from params
-        n_actions = env.action_space.n  # Number of actions
-
+        if spaceInvaders:
+            n_actions = env.action_space.n  # Number of actions
+        else:
+            n_actions = len(env.ACTIONS)
         # Ensure the neural network and the data are on the same device
         print("Trying to use device:", self.__params_used['device'])
         if self.__params_used['device'] == "cuda":  # test i we can run cuda, if not we use cpu

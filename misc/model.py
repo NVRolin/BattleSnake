@@ -13,25 +13,23 @@ class DQNetworkCNN(nn.Module):
         self.__hidden_size = hidden_size
 
         self.__c1_block = nn.Sequential(
-            # 11×11 → 11×11
-            nn.Conv2d(self.__input_size, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(self.__input_size, 32, kernel_size=3),
+            nn.LeakyReLU(),
 
-            # 11×11 → 11×11
-            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3),
+            nn.LeakyReLU(),
 
-            # (optionally) downsample to e.g. 5×5
-            nn.Conv2d(64, 128, kernel_size=2, stride=2, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3),
+            nn.LeakyReLU(),
+            nn.Conv2d(128, 256, kernel_size=3),
+            nn.LeakyReLU()
         )
-
         FC_size = self._get_conv_out(self.__input_size)
 
         self.__FC_block = nn.Sequential(
             # nn.Flatten(), #Flatten into single vector
             nn.Linear(in_features=FC_size, out_features=self.__hidden_size),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             # nn.Linear(in_features=self.__hidden_size,  out_features=self.__hidden_size),
             # nn.ReLU(),
             nn.Linear(in_features=self.__hidden_size, out_features=self.__output_size)
@@ -40,11 +38,11 @@ class DQNetworkCNN(nn.Module):
         # Initialize linear layers with kaiming initialization
         for layer in self.__FC_block:
             if isinstance(layer, nn.Linear):
-                init.kaiming_uniform_(layer.weight, nonlinearity="relu")
+                init.kaiming_uniform_(layer.weight, nonlinearity="leaky_relu")
         # Initialize conv2d layers with kaiming initialization
         for layer in self.__c1_block:
             if isinstance(layer, nn.Conv2d):
-                init.kaiming_uniform_(layer.weight, nonlinearity="relu")
+                init.kaiming_uniform_(layer.weight, nonlinearity="leaky_relu")
 
     def forward(self, x):
         # with profiler.record_function("LINEAR PASS"):

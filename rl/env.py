@@ -1,10 +1,6 @@
 import numpy as np
 import random
-from typing import List, Tuple, Dict, Optional, Any
-
-from numpy import ndarray, dtype, signedinteger
-from numpy._typing import _32Bit
-
+from typing import List, Tuple, Dict, Optional
 
 class BattlesnakeEnv:
     DIRECTIONS = {
@@ -17,6 +13,7 @@ class BattlesnakeEnv:
     ACTION_NAMES = ['up', 'down', 'left', 'right']
     NAME = 'Battlesnake'
     def __init__(self, board_size: int = 11, n_snakes: int = 1, seed: Optional[int] = None):
+        self.food_eaten = [False] * n_snakes
         self.board_size = board_size
         self.n_snakes = max(1, min(4, n_snakes))
         self.seed = seed
@@ -51,15 +48,11 @@ class BattlesnakeEnv:
         for i in range(self.n_snakes):
             x, y = placements[i]
             self.snakes.append([(x, y)])
-            # Two first snakes are ours, so same grayscale color
-            if i < 2:
-                self.board[y, x] = 255
-            else:
-                self.board[y, x] = 127
+            self.board[y, x] = 2 + i
             self.snake_alive.append(True)
             self.snake_health.append(100)
             self.elimination_causes.append(None)
-            self.target_lengths.append(self.starting_length) 
+            self.target_lengths.append(self.starting_length)
 
         self.spawn_food()
         return self.get_observation()
@@ -69,7 +62,6 @@ class BattlesnakeEnv:
             raise ValueError(f"Expected {self.n_snakes} actions, got {len(actions)}")
         self.turns += 1
         rewards = [0.0] * self.n_snakes
-        reward_shaping = [0.0] * self.n_snakes  # Additional reward signals for shaping
         done = False
 
         next_heads = []
@@ -106,7 +98,7 @@ class BattlesnakeEnv:
             if not (0 <= new_head[0] < self.board_size and 0 <= new_head[1] < self.board_size):
                 self.snake_alive[i] = False
                 self.elimination_causes[i] = "wall_collision"
-                rewards[i] = -10.0
+                rewards[i] = -1.0
                 next_heads[i] = None
                 for x, y in self.snakes[i]:
                     if 0 <= x < self.board_size and 0 <= y < self.board_size:
@@ -172,17 +164,15 @@ class BattlesnakeEnv:
                             if 0 <= x < self.board_size and 0 <= y < self.board_size:
                                 self.board[y, x] = 0
 
-        food_eaten = [False] * self.n_snakes
+        self.food_eaten = [False] * self.n_snakes
         for i in range(self.n_snakes):
             if not self.snake_alive[i] or next_heads[i] is None:
                 continue
             x, y = next_heads[i]
             if 0 <= x < self.board_size and 0 <= y < self.board_size and self.board[y, x] == 1:
-                food_eaten[i] = True
+                self.food_eaten[i] = True
                 self.snake_health[i] = 100
                 rewards[i] = 1.0
-                # Add reward proportional to snake length (encourages growth strategy)
-                reward_shaping[i] += 0.1 * len(self.snakes[i])
                 self.food.remove((x, y))
                 self.board[y, x] = 0
                 self.target_lengths[i] += 1
@@ -203,52 +193,17 @@ class BattlesnakeEnv:
                     self.board[tail_y, tail_x] = 0
 
         for i in range(self.n_snakes):
-            if self.snake_alive[i] and not food_eaten[i]:
+            if self.snake_alive[i] and not self.food_eaten[i]:
                 self.snake_health[i] -= 1
                 if self.snake_health[i] <= 0:
                     self.snake_alive[i] = False
                     self.elimination_causes[i] = "starvation"
                     rewards[i] = -1.0
-                    # Penalize more for dying early, less for dying late
-                    reward_shaping[i] -= max(0, (500 - self.turns) / 500)
                     for x, y in self.snakes[i]:
                         if 0 <= x < self.board_size and 0 <= y < self.board_size:
                             self.board[y, x] = 0
+
         self.spawn_food()
-
-        # Add distance-based reward shaping for living snakes
-        for i in range(self.n_snakes):
-            if not self.snake_alive[i]:
-                continue
-
-            # Small reward for survival
-            reward_shaping[i] += 0.01
-
-            # Find closest food and add reward for moving toward it
-            if self.food and len(self.snakes[i]) > 0:
-                head_x, head_y = self.snakes[i][0]
-                min_distance = float('inf')
-                for food_x, food_y in self.food:
-                    distance = abs(head_x - food_x) + abs(head_y - food_y)  # Manhattan distance
-                    min_distance = min(min_distance, distance)
-
-                # Reward for being close to food (inverse of distance)
-                if min_distance < self.board_size:
-                    reward_shaping[i] += 0.1 * (1.0 / min_distance)
-
-            # Add reward for avoiding walls when close to them
-            if len(self.snakes[i]) > 0:
-                head_x, head_y = self.snakes[i][0]
-                wall_penalty = 0
-                if head_x <= 1 or head_x >= self.board_size - 2:
-                    wall_penalty += 0.05
-                if head_y <= 1 or head_y >= self.board_size - 2:
-                    wall_penalty += 0.05
-                reward_shaping[i] -= wall_penalty
-
-            # Combine shaped rewards with main rewards
-            rewards[i] += reward_shaping[i]
-
         done = all(not alive for alive in self.snake_alive)
 
         info = {
@@ -264,7 +219,7 @@ class BattlesnakeEnv:
             if not empty:
                 break
             pos = random.choice(empty)
-            self.board[pos[0], pos[1]] = 175
+            self.board[pos[0], pos[1]] = 1
             self.food.append((pos[1], pos[0]))
             needed -= 1
 
@@ -275,6 +230,7 @@ class BattlesnakeEnv:
             "food": self.food.copy(),
             "alive": self.snake_alive.copy(),
             "health": self.snake_health.copy(),
+            "food_eaten": self.food_eaten.copy(),
             "turn": self.turns,
             "elimination_causes": self.elimination_causes.copy()
         }

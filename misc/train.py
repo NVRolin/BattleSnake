@@ -10,7 +10,7 @@ device = torch.device('cuda')
 spaceInvaders = False
 if __name__ == "__main__":
 
-    do_train = True
+    do_train = False
 
     path = "./models/Battlesnake/"
     seed = None
@@ -46,11 +46,11 @@ if __name__ == "__main__":
             'discount_factor': 0.999,
             'n_ep_running_average': 10,
             'alpha': 0.001,
-            'target_network_update_freq': 500,
+            'target_network_update_freq': 50,
             'batch_size': 256,
             'eps_min': 0.1,
             'eps_max': 1,
-            'n_frames': 1,
+            'n_frames': 13,
             'times_tested': 1,
             'env': env_name,
             'seed': seed
@@ -82,6 +82,25 @@ if __name__ == "__main__":
         else:
             env1 = rl.env.BattlesnakeEnv(11,1)
 
+        # env2 = gym.make(env_name, render_mode="human")
+        # env2 = stable_baselines3.common.atari_wrappers.AtariWrapper(env2)
+        # env2.metadata['render_fps'] =60
+
+        dqn_agent.test_policy(env1,20,dual=False)
+        # env2 = env2.close()
+        # env1 = env1.close()
+
+    else:
+        # Load the model and parameters
+        path = "./models/Battlesnake/_11"
+        if spaceInvaders:
+            env_name = "ALE/SpaceInvaders-v5"
+            env1 = gym.make(env_name, render_mode="human", frameskip=1, repeat_action_probability=0)
+            env1 = gym.wrappers.AtariPreprocessing(env1, **wrapper_args)
+            env1.metadata['render_fps'] = 60
+        else:
+            env1 = rl.env.BattlesnakeEnv(11,1)
+        dqn_agent = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env1)
         # env2 = gym.make(env_name, render_mode="human")
         # env2 = stable_baselines3.common.atari_wrappers.AtariWrapper(env2)
         # env2.metadata['render_fps'] =60
