@@ -204,8 +204,10 @@ class BattlesnakeEnv:
                             self.board[y, x] = 0
 
         self.spawn_food()
-        done = all(not alive for alive in self.snake_alive)
 
+        #done = all(not alive for alive in self.snake_alive)
+        # When we train we dont want to continue when our snake dies
+        done = not self.snake_alive[0]
         info = {
             "turn": self.turns,
             "elimination_causes": self.elimination_causes.copy()

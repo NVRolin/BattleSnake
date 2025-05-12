@@ -226,14 +226,9 @@ class DQNAgent(Agent):
         # but you cannot fill a buffer without Q values (which actions to take?)
         # so instead, you can fill it initially by choosing uniformly random actions
         env.reset()
-        state = env.get_observation()
-        state = state["board"]
-        state = self.__process(state)  # Preprocess the input
-        done = False
-        reward = 0
         action_for_frames = []
-        stacked_state,action_for_frames, reward, done,_ = self.__stack_frames(env, state, action_for_frames, reward,
-                                                          done)  # stack first frames
+        stacked_state,action_for_frames = self.__stack_frames(env,action_for_frames,True)
+        stacked_state = stacked_state[0]
         print("Filling buffer...")
         for i in range(self.__experience_replay_buffer.get_capacity()):
             # Current state frame processing
@@ -257,15 +252,14 @@ class DQNAgent(Agent):
             # The method will append frames for the first frames in a episode
             # Next state
             next_state, reward, terminal, _ = env.step(action_for_frames)
-            next_state = next_state["board"]
             reward = reward[0]
             done = terminal
             if done:
                 stacked_next_state = stacked_state
             else:
                 # next state processing
-                next_state = self.__process(next_state)
-                stacked_next_state,action_for_frames, reward, done, _= self.__stack_frames(env, next_state, action_for_frames, reward, done)
+                stacked_next_state,action_for_frames = self.__stack_frames(env, action_for_frames,True)
+                stacked_next_state = stacked_next_state[0]
                 # if not ended, next state becomes current
             reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False)
             action_for_frames_tensor = torch.tensor([agentAction], dtype=torch.int64, requires_grad=False)
@@ -277,111 +271,110 @@ class DQNAgent(Agent):
             self.__experience_replay_buffer.append(exp)
             if done:
                 env.reset()
-                state = env.get_observation()
-                state = state["board"]
-                state = self.__process(state)
-                done = False
-                reward = 0
-                action_for_frames = 0
-                stacked_state,action_for_frames, reward, done, _ = self.__stack_frames(env, state, action_for_frames, reward, done)
+                action_for_frames = np.random.randint(self._n_actions)
+                stacked_state,action_for_frames = self.__stack_frames(env, action_for_frames,True)
+                stacked_state = stacked_state[0]
             else:
                 stacked_state = stacked_next_state
         print("Buffer filled!")
-    def __process(self, state):
-        # state = rescale(state, scale=0.5)
-        state = state[np.newaxis, np.newaxis, :, :]
-        state = torch.tensor(np.array(state), dtype=torch.uint8, requires_grad=False)
-        # state_tensor2 = state_tensor2[..., 0]
-        # state_tensor2 = state_tensor2.unsqueeze(0)
-        # print(state_tensor2.size())
-        return state
 
-    def __stack_frames(self, env, current_state, current_action, tot_reward, done,info ={}):
+    def __stack_frames(self, env, current_action,getSolo=False):
         # Battlesnake stackinng of frames inspired by https://medium.com/asymptoticlabs/battlesnake-post-mortem-a5917f9a3428
-        B = env.board_size
-        direction = None
-        # Create frame with health at head
-        health_frame = np.zeros((B, B), dtype=np.uint8)
-        bin_body_frame = np.zeros((B, B), dtype=np.uint8)
-        segment_body_frame = np.zeros((B, B), dtype=np.uint8)
-        longer_opponent_frame = np.zeros((B, B), dtype=np.uint8)
-        food_frame = np.zeros((B, B), dtype=np.uint8)
-        board_frame = np.full((B, B), 255, dtype=np.uint8)
-        agent_head_frame = np.zeros((B, B), dtype=np.uint8)
-        double_tail_frame = np.zeros((B, B), dtype=np.uint8)
-        longer_size_frame = np.zeros((B, B), dtype=np.uint8)
-        shorter_size_frame = np.zeros((B, B), dtype=np.uint8)
+        current_states = []
         obs = env.get_observation()
-        for i in range(len(obs['snakes'])):
-            snake = obs['snakes'][i]
-            head_x, head_y = snake[0]
-            health = obs['health'][i]
-            health_frame[head_y, head_x] = health * 255 // 100
-            for j in range(len(snake)):
-                x, y = snake[j]
-                bin_body_frame[y, x] = 255
-                segment_body_frame[y, x] = j
-                if len(snake) > len(obs['snakes'][0]):
-                    longer_size_frame[y, x] = len(snake)-len(obs['snakes'][0])
-                elif len(snake) < len(obs['snakes'][0]):
-                    shorter_size_frame[y, x] = len(obs['snakes'][0])-len(snake)
-            if len(snake) > len(obs['snakes'][0]):
-                longer_opponent_frame[head_y, head_x] = 255
-            if obs['food_eaten'][i]:
-                double_tail_x, double_tail_y = snake[-1]
-                double_tail_frame[double_tail_y, double_tail_x] = 255
-        for x, y in obs['food']:
-            food_frame[y, x] = 255
-        head_x, head_y = obs['snakes'][0][0]
-        if len(obs['snakes'][0]) > 1:
-            neck_x, neck_y = obs['snakes'][0][1]
+        if getSolo:
+            maxAgents = 1
         else:
-            neck_x, neck_y = obs['snakes'][0][0]
-        if neck_x < head_x:
-            direction = "right"
-        elif neck_x > head_x:
-            direction = "left"
-        elif neck_y < head_y:
-            direction = "down"
-        elif neck_y > head_y:
-            direction = "up"
-        else:
-            direction = "up"
-        agent_head_frame[head_y, head_x] = 255
-        alive_flags = obs['alive']
-        alive_count = sum(alive_flags)
-        other_alive = alive_count - 1
-        idx = max(0, min(other_alive-1, 2))
-        alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)
-        alive_count_frames[idx, :, :] = 255
+            maxAgents = env.n_snakes
 
-        all_frames = np.stack([
-            health_frame,
-            bin_body_frame,
-            segment_body_frame,
-            longer_opponent_frame,
-            food_frame,
-            board_frame,
-            agent_head_frame,
-            double_tail_frame,
-            longer_size_frame,
-            shorter_size_frame,
-            *alive_count_frames
-        ], axis=0)
-        # We want to always face up to reduce state space
-        """if direction == "right":
-            all_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
-            current_action = (current_action + 3) % 4
-        elif direction == "left":
-            all_frames = np.rot90(all_frames, k=1,axes=(1, 2)).copy()
-            current_action = (current_action + 1) % 4
-        elif direction == "down":
-            all_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
-            current_action = (current_action + 2) % 4"""
-        current_state = torch.from_numpy(all_frames)
-        current_state = current_state[np.newaxis, :, :, :]
+        for i in range(maxAgents):
+            B = env.board_size
+            direction = None
+            # Create frame with health at head
+            health_frame = np.zeros((B, B), dtype=np.uint8)
+            bin_body_frame = np.zeros((B, B), dtype=np.uint8)
+            segment_body_frame = np.zeros((B, B), dtype=np.uint8)
+            longer_opponent_frame = np.zeros((B, B), dtype=np.uint8)
+            food_frame = np.zeros((B, B), dtype=np.uint8)
+            board_frame = np.full((B, B), 255, dtype=np.uint8)
+            agent_head_frame = np.zeros((B, B), dtype=np.uint8)
+            double_tail_frame = np.zeros((B, B), dtype=np.uint8)
+            longer_size_frame = np.zeros((B, B), dtype=np.uint8)
+            shorter_size_frame = np.zeros((B, B), dtype=np.uint8)
+            for i in range(len(obs['snakes'])):
+                if not obs['alive'][i]:
+                    continue
+                snake = obs['snakes'][i]
+                head_x, head_y = snake[0]
+                health = obs['health'][i]
+                health_frame[head_y, head_x] = health * 255 // 100
+                for j in range(len(snake)):
+                    x, y = snake[j]
+                    bin_body_frame[y, x] = 255
+                    segment_body_frame[y, x] = j
+                    if len(snake) > len(obs['snakes'][i]):
+                        longer_size_frame[y, x] = len(snake)-len(obs['snakes'][i])
+                    elif len(snake) < len(obs['snakes'][i]):
+                        shorter_size_frame[y, x] = len(obs['snakes'][i])-len(snake)
+                if len(snake) > len(obs['snakes'][i]):
+                    longer_opponent_frame[head_y, head_x] = 255
+                if obs['food_eaten'][i]:
+                    double_tail_x, double_tail_y = snake[-1]
+                    double_tail_frame[double_tail_y, double_tail_x] = 255
+            for x, y in obs['food']:
+                food_frame[y, x] = 255
+            head_x, head_y = obs['snakes'][0][0]
+            if len(obs['snakes'][i]) > 1:
+                neck_x, neck_y = obs['snakes'][i][1]
+            else:
+                neck_x, neck_y = obs['snakes'][i][0]
+            if neck_x < head_x:
+                direction = "right"
+            elif neck_x > head_x:
+                direction = "left"
+            elif neck_y < head_y:
+                direction = "down"
+            elif neck_y > head_y:
+                direction = "up"
+            else:
+                direction = "up"
+            agent_head_frame[head_y, head_x] = 255
+            alive_flags = obs['alive']
+            alive_count = sum(alive_flags)
+            other_alive = alive_count - 1
+            idx = max(0, min(other_alive-1, 2))
+            alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)
+            alive_count_frames[idx, :, :] = 255
 
-        return current_state, current_action,tot_reward, done,info
+            all_frames = np.stack([
+                health_frame,
+                bin_body_frame,
+                segment_body_frame,
+                longer_opponent_frame,
+                food_frame,
+                board_frame,
+                agent_head_frame,
+                double_tail_frame,
+                longer_size_frame,
+                shorter_size_frame,
+                *alive_count_frames
+            ], axis=0)
+            # We want to always face up to reduce state space
+            """if direction == "right":
+                all_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
+                current_action = (current_action + 3) % 4
+            elif direction == "left":
+                all_frames = np.rot90(all_frames, k=1,axes=(1, 2)).copy()
+                current_action = (current_action + 1) % 4
+            elif direction == "down":
+                all_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
+                current_action = (current_action + 2) % 4"""
+            current_state = torch.from_numpy(all_frames)
+            current_state = current_state[np.newaxis, :, :, :]
+            # We add the current state to the list of current states
+            current_states.append(current_state)
+
+        return current_states, current_action
 
     def __running_average(self, x, N):
         # Function used to compute the running average of the last N elements of a vector x
@@ -530,8 +523,6 @@ class DQNAgent(Agent):
         """Run a single training episode and return stats."""
         # Reset environment
         state = env.reset()
-        state = state["board"]
-        state = self.__process(state)
 
         # Initialize episode variables
         done = False
@@ -542,7 +533,7 @@ class DQNAgent(Agent):
         loss = None
 
         # Stack initial frames
-        stacked_next_state,next_action, reward, done,_ = self.__stack_frames(env, state, next_action, reward, done)
+        stacked_next_state,next_action = self.__stack_frames(env, next_action)
 
         # Episode loop
         while not done:
@@ -552,42 +543,40 @@ class DQNAgent(Agent):
             # Choose action using epsilon-greedy policy
 
             # Display current state
-            """for frame_idx in range(stacked_state.size(1)):  # Iterate through all frames in the stacked state
-                plt.imshow(np.array(stacked_state.squeeze(0)[frame_idx].cpu()))
-                plt.title(f"State Frame {frame_idx}")
-                plt.show()"""
-            agentAction = self._forward(stacked_state, epsilon)
+
+            agentAction = self._forward(stacked_state[0], epsilon)
             next_action.append(agentAction)
             if self.dqn_agent_friend is not None:
-                next_action.append(self.dqn_agent_friend._forward(stacked_state, 0))
+                next_action.append(self.dqn_agent_friend._forward(stacked_state[1], 0))
             # Get action for enemy agent 1
             if self.dqn_agent_enemy1 is not None:
-                next_action.append(self.dqn_agent_enemy1._forward(stacked_state, 0))
+                next_action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0))
             # Get action for enemy agent 2
             if self.dqn_agent_enemy2 is not None:
-                next_action.append(self.dqn_agent_enemy2._forward(stacked_state, 0))
+                next_action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0))
             # Take action in environment
             if done:  # Will never happen
                 stacked_next_state = stacked_state
             else:
                 # Get next state and reward. What are terminal and truncated? If episode ended.
                 next_state, reward, terminal_next_state, _ = env.step(next_action)
-                next_state = next_state["board"]
                 reward = reward[0]
                 done = terminal_next_state
                 if done:
                     stacked_next_state = stacked_state
                 else:
-                    next_state = self.__process(next_state)
-                    stacked_next_state,next_action, reward, done,_ = self.__stack_frames(env, next_state, next_action, reward,
-                                                                           done)
+                    stacked_next_state,next_action = self.__stack_frames(env, next_action)
             # Update counters and rewards
             total_episode_reward += reward
             self.__steps += 1
             self.__total_steps += 1
 
             # Store experience in replay buffer
-            self.__store_experience(stacked_state, agentAction, reward, stacked_next_state, done)
+            """print(np.array(stacked_state[0].squeeze(0)[0].cpu()))
+            plt.imshow(np.array(stacked_state[0].squeeze(0)[0].cpu()))
+            plt.show()"""
+
+            self.__store_experience(stacked_state[0], agentAction, reward, stacked_next_state[0], done)
 
             # Update neural network
             loss = self._backward(batch_size)
@@ -665,48 +654,27 @@ class DQNAgent(Agent):
 
 
 
-    def _forward_processing(self, env, state, action, reward, done,info={}):
-        info_next_state = {}
-        state = state["board"]
-        if not torch.is_tensor(state):
-            state = self.__process(state)
-        stacked_state,action, reward, done,info = self.__stack_frames(env, state, action, reward, done,info)
+    def _forward_processing(self, env,action):
+        stacked_state,action = self.__stack_frames(env, action)
         action = []
-        action.append(self._forward(stacked_state, 0))
+        action.append(self._forward(stacked_state[0], 0))
         # Get action for friendly agent
         if self.dqn_agent_friend is not None:
-            action.append(self.dqn_agent_friend._forward(stacked_state, 0))
+            action.append(self.dqn_agent_friend._forward(stacked_state[1], 0))
         # Get action for enemy agent 1
         if self.dqn_agent_enemy1 is not None:
-            action.append(self.dqn_agent_enemy1._forward(stacked_state, 0))
+            action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0))
         # Get action for enemy agent 2
         if self.dqn_agent_enemy2 is not None:
-            action.append(self.dqn_agent_enemy2._forward(stacked_state, 0))
-        if done:
-            stacked_next_state = stacked_state
-            reward_next_state = reward
-            done_next_state = done
-        else:
-            # Get next state and reward. What are terminal and truncated? If episode ended.
-            next_state, reward_next_state, terminal_next_state, info_next_state = env.step(action)
-            next_state = next_state["board"]
-            reward_next_state = reward_next_state[0]
-            done_next_state = terminal_next_state
-            if done_next_state:
-                stacked_next_state = stacked_state
-                reward_next_state = reward
-                done_next_state = done_next_state
-            else:
-                next_state = self.__process(next_state)
-                stacked_next_state,action, reward_next_state, done_next_state,info_next_state = self.__stack_frames(env, next_state, action,
-                                                                                             reward_next_state,
-                                                                                             done_next_state,info_next_state)
-                reward_next_state += reward
-        # Append the next state to the stack of frames.
-        # stacked_next_state = torch.cat([stacked_state, next_state], 1)
-        # Remove the oldest frame so that we have a correct frame count.
-        # stacked_next_state = stacked_next_state[:, 1:, :, :]
-        return env, stacked_next_state, action, reward_next_state, done_next_state,info_next_state
+            action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0))
+
+        # Get next state and reward. What are terminal and truncated? If episode ended.
+        next_state, reward_next_state, terminal_next_state, info_next_state = env.step(action)
+        reward_next_state = reward_next_state[0]
+        done_next_state = terminal_next_state
+        if not done_next_state:
+            stacked_next_state,action = self.__stack_frames(env, action)
+        return action, reward_next_state, done_next_state
 
     def test_policy(self, env1, n_episodes=50):
         # Simulate episodes

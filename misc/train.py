@@ -1,9 +1,7 @@
 import numpy as np
 import torch
-import gymnasium as gym
 import torch.optim as optim
 import model
-import ale_py
 import agent
 import rl.env
 device = torch.device('cuda')
@@ -21,9 +19,9 @@ if __name__ == "__main__":
         desc = "Basic save and load test"
 
         base_params = {
-            'n_episodes': 20000,
+            'n_episodes': 2000,
             'n_steps': 0,
-            'buffer_size': 200000,
+            'buffer_size': 20000,
             'hidden_size': 512,
             'device': "cuda",
             'discount_factor': 0.999,
@@ -64,7 +62,7 @@ if __name__ == "__main__":
         dqn_agent.test_policy(env,20)
     else:
         # Load the model and parameters
-        path = "./models/Battlesnake/_11"
+        path = "./models/Battlesnake/_10"
         dual = True
         if dual is True:
             env = rl.env.BattlesnakeEnv(11,4)

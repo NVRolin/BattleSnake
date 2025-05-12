@@ -7,7 +7,7 @@ class DrawBattlesnakeEnvironment:
         self.done = False
         self.info = {}
         self.env = env
-        self.obs = self.env.reset()
+        self.env.reset()
         self.action = []
 
         # Initialize renderers
@@ -24,15 +24,14 @@ class DrawBattlesnakeEnvironment:
         self.rewards = []
         self.done = False
         self.info = {}
-        self.obs = self.env.reset()
+        self.env.reset()
         self.action = []
 
     def __update(self, agent):
         if not self.done:
             self.renderer.render(self.env.get_observation(), self.info, fps=10)
 
-            self.env, self.obs, self.action, self.reward, self.done,self.info = agent._forward_processing(
-                self.env, self.env.get_observation(), self.action, self.reward, self.done,self.info)
+            self.action, self.reward, self.done = agent._forward_processing(self.env, self.action)
             if self.done:
                 self.rewards.append(self.reward)
 
