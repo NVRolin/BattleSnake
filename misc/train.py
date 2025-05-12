@@ -28,12 +28,12 @@ if __name__ == "__main__":
             'n_ep_running_average': 10,
             'alpha': 0.001,
             'target_network_update_freq': 500,
-            'batch_size': 16,
+            'batch_size': 32,
             'eps_min': 0.1,
             'eps_max': 1,
             'n_frames': 13,
-            'times_tested': "./models/Battlesnake/_14",
-            'friendly_model': "./models/Battlesnake/_14",
+            'times_tested': "./models/Battlesnake/_15",
+            'friendly_model': "./models/Battlesnake/_15",
             'enemy_model': 1,
             'env': env_name,
             'seed': seed
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         dqn_agent.test_policy(env,20)
     else:
         # Load the model and parameters
-        path = "./models/Battlesnake/_14"
+        path = "./models/Battlesnake/_15"
         dual = True
         if dual is True:
             env = rl.env.BattlesnakeEnv(11,4)

@@ -287,7 +287,7 @@ class DQNAgent(Agent):
         else:
             maxAgents = env.n_snakes
 
-        for i in range(maxAgents):
+        for n in range(maxAgents):
             B = env.board_size
             direction = None
             # Create frame with health at head
@@ -312,22 +312,22 @@ class DQNAgent(Agent):
                     x, y = snake[j]
                     bin_body_frame[y, x] = 255
                     segment_body_frame[y, x] = j
-                    if len(snake) > len(obs['snakes'][i]):
-                        longer_size_frame[y, x] = len(snake)-len(obs['snakes'][i])
-                    elif len(snake) < len(obs['snakes'][i]):
-                        shorter_size_frame[y, x] = len(obs['snakes'][i])-len(snake)
-                if len(snake) > len(obs['snakes'][i]):
+                    if len(snake) > len(obs['snakes'][n]):
+                        longer_size_frame[y, x] = len(snake)-len(obs['snakes'][n])
+                    elif len(snake) < len(obs['snakes'][n]):
+                        shorter_size_frame[y, x] = len(obs['snakes'][n])-len(snake)
+                if len(snake) > len(obs['snakes'][n]):
                     longer_opponent_frame[head_y, head_x] = 255
                 if obs['food_eaten'][i]:
                     double_tail_x, double_tail_y = snake[-1]
                     double_tail_frame[double_tail_y, double_tail_x] = 255
             for x, y in obs['food']:
                 food_frame[y, x] = 255
-            head_x, head_y = obs['snakes'][0][0]
-            if len(obs['snakes'][i]) > 1:
-                neck_x, neck_y = obs['snakes'][i][1]
+            head_x, head_y = obs['snakes'][n][0]
+            if len(obs['snakes'][n]) > 1:
+                neck_x, neck_y = obs['snakes'][n][1]
             else:
-                neck_x, neck_y = obs['snakes'][i][0]
+                neck_x, neck_y = obs['snakes'][n][0]
             if neck_x < head_x:
                 direction = "right"
             elif neck_x > head_x:
@@ -373,7 +373,6 @@ class DQNAgent(Agent):
             current_state = current_state[np.newaxis, :, :, :]
             # We add the current state to the list of current states
             current_states.append(current_state)
-
         return current_states, current_action
 
     def __running_average(self, x, N):
@@ -667,7 +666,10 @@ class DQNAgent(Agent):
         # Get action for enemy agent 2
         if self.dqn_agent_enemy2 is not None:
             action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0))
-
+        """print(np.array(stacked_state[0].squeeze(0)[6].cpu()))
+        print(np.array(stacked_state[1].squeeze(0)[6].cpu()))
+        print(np.array(stacked_state[2].squeeze(0)[6].cpu()))
+        print(np.array(stacked_state[3].squeeze(0)[6].cpu()))"""
         # Get next state and reward. What are terminal and truncated? If episode ended.
         next_state, reward_next_state, terminal_next_state, info_next_state = env.step(action)
         reward_next_state = reward_next_state[0]
