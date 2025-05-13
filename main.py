@@ -14,9 +14,9 @@ RL_MODEL = None
 MOVE_MAPPING = ["up", "down", "left", "right"]
 
 def load_model(board_size):
-    model_path = f"rl/models/Battlesnake/_{board_size}"
+    model_path = f"rl/models/candidates/_{board_size}"
 
-    assert os.path.exists(model_path), "No models found in rl/models/Battlesnake"
+    assert os.path.exists(model_path), "No models found in rl/models/candidates"
     
     class tempEnv:
         ACTIONS = [0, 1, 2, 3]
@@ -96,10 +96,10 @@ def info() -> typing.Dict:
 
     return {
         "apiversion": "1",
-        "author": "",  # TODO: Your Battlesnake Username
-        "color": "#888888",  # TODO: Choose color
-        "head": "default",  # TODO: Choose head
-        "tail": "default",  # TODO: Choose tail
+        "author": "gr1",
+        "color": "#8B0000",
+        "head": "default",
+        "tail": "default",
     }
 
 

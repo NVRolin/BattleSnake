@@ -9,7 +9,7 @@ if __name__ == "__main__":
 
     do_train = True
 
-    path = "./models/Battlesnake/"
+    path = "./models/experiments/"
     seed = None
     np.random.seed(seed)
     if do_train is True:
@@ -32,8 +32,8 @@ if __name__ == "__main__":
             'eps_min': 0.1,
             'eps_max': 1,
             'n_frames': 13,
-            'times_tested': "./models/Battlesnake/_15",
-            'friendly_model': "./models/Battlesnake/_15",
+            'times_tested': "./models/experiments/_15",
+            'friendly_model': "./models/experiments/_15",
             'enemy_model': 1,
             'env': env_name,
             'seed': seed
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         dqn_agent.test_policy(env,20)
     else:
         # Load the model and parameters
-        path = "./models/Battlesnake/_15"
+        path = "./models/experiments/_15"
         dual = True
         if dual is True:
             env = gym.env.BattlesnakeEnv(11,4)

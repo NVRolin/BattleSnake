@@ -5,5 +5,4 @@ __pycache__/
 /models
 /venv
 /battlesnake*
-/misc/models
-/misc/runs
+*/runs

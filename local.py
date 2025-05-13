@@ -88,7 +88,7 @@ def convert_state_to_frames(obs, board_size, snake_idx=0):
 
 def list_available_models():
     models = []
-    model_dir = "rl/models/Battlesnake"
+    model_dir = "rl/models/candidates"
     if os.path.exists(model_dir):
         for model_name in os.listdir(model_dir):
             model_path = os.path.join(model_dir, model_name)
@@ -114,14 +114,14 @@ if __name__ == "__main__":
     models = list_available_models()
     
     if not models:
-        print("No models found in rl/models/Battlesnake directory")
+        print("No models found in rl/models/candidates directory")
         sys.exit(1)
     
     use_default = input("Use default models? (y/n): ").lower() == 'y'
     
     if use_default and len(models) >= 2:
         model1_path = models[0]
-        model2_path = models[1]
+        model2_path = models[0]
     else:
         model1_path = choose_model(models, 1)
         model2_path = choose_model(models, 2)

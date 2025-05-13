@@ -76,9 +76,8 @@ class DQNAgent(Agent):
         self.__n_frames = n_frames
         self.__steps = 0
         self.__total_steps = 0
-        self.__nn = neural_network.cuda()
-        if self.__nn.get_device() == "cuda":
-            self.__nn = self.__nn.cuda()  # specify the device of the neural network to cuda.
+        device = neural_network.get_device()
+        self.__nn = neural_network.to(device)
         self.__discount_factor = torch.tensor(discount_factor, device=self.__nn.get_device(), requires_grad=False)
         # Save the params used by the agent for loading and saving.
         self.__params_used = {}
@@ -700,7 +699,7 @@ class DQNAgent(Agent):
         }, path)
 
     def __load_model(self, path):  # We load the model from the path we saved to.
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, map_location=torch.device(self.__params_used['device']))
         self.__nn.load_state_dict(checkpoint['neural_network_state_dict'])
         self.__optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
@@ -785,6 +784,8 @@ class DQNAgent(Agent):
         if self.__params_used['device'] == "cuda":  # test i we can run cuda, if not we use cpu
             print("Is CUDA enabled?", torch.cuda.is_available())
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            device = torch.device("cpu")
         main_network = DQNetworkCNN(self.__params_used['output_size'], self.__params_used['input_size'],
                                        self.__params_used['hidden_size'], device)
         main_network = main_network.to(main_network.get_device())  # Move main network to Device

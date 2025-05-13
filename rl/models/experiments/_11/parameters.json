@@ -1,0 +1,23 @@
+{
+    "buffer_size": 200000,
+    "n_frames": 13,
+    "discount_factor": 0.999,
+    "n_actions": 4,
+    "input_size": 13,
+    "hidden_size": 512,
+    "output_size": 4,
+    "device": "cuda",
+    "lr": 0.001,
+    "n_episodes": 20000,
+    "n_ep_running_average": 10,
+    "target_network_update_freq": 50,
+    "batch_size": 256,
+    "eps_min": 0.1,
+    "eps_max": 1,
+    "wrapper_args": {},
+    "env_name": "Battlesnake",
+    "start_time": "2025-05-09 19:57:34",
+    "total_steps": 725990,
+    "end_time": "2025-05-09 22:03:12",
+    "desc": "Basic save and load test"
+}
