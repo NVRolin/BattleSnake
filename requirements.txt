@@ -1,1 +1,8 @@
 Flask==2.3.2
+
+gym~=0.26.2
+torch~=2.7.0+cu118
+numpy~=2.0.2
+matplotlib~=3.9.4
+tqdm~=4.67.1
+pygame~=2.1.0

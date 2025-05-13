@@ -180,17 +180,13 @@ class DQNAgent(Agent):
         done = done.to(self.__nn.get_device(), dtype=torch.bool)
         # We want to get the maximum along the second dimension of the tensor, and [0] accesses the value not the indices of the tensor.
         """for i in range(len(reward)):
-            if done[i]:
+            if reward[i].item() != 0:
                 ACTION_NAMES = ['up', 'down', 'left', 'right']
                 print(done[i],ACTION_NAMES[action[i].item()], reward[i].item())
-                for frame_idx in range(state.size(1)):  # Iterate through all frames in the stacked state
-                    plt.imshow(np.array(state.squeeze(0)[i][frame_idx].cpu()))
-                    plt.title(f"State Frame {frame_idx}")
-                    plt.show()
-                for frame_idx in range(next_state.size(1)):  # Iterate through all frames in the stacked next state
-                    plt.imshow(np.array(next_state.squeeze(0)[i][frame_idx].cpu()))
-                    plt.title(f"Next State Frame {frame_idx}")
-                    plt.show()"""
+                plt.imshow(np.array(next_state.squeeze(0)[i][6].cpu()))
+                plt.show()
+                plt.imshow(np.array(next_state.squeeze(0)[i][1].cpu()))
+                plt.show()"""
         with torch.no_grad():  # Detach qvalues_next_state from the computation graph
             """print(next_state.shape)"""
             qvalues_next_state = self.__target_nn(next_state).max(dim=1)[0]
@@ -267,9 +263,9 @@ class DQNAgent(Agent):
                 stacked_next_state,action_for_frames = self.__stack_frames(env, action_for_frames,True)
                 stacked_next_state = stacked_next_state[0]
                 # if not ended, next state becomes current
-            reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False)
-            action_for_frames_tensor = torch.tensor([agentAction], dtype=torch.int64, requires_grad=False)
-            done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
+            reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+            action_for_frames_tensor = torch.tensor([agentAction], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+            done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
 
             # Form Experience tuple from state, action, reward, next_state, done, and append it to the buffer
             exp = Experience(stacked_state.detach(), action_for_frames_tensor.detach(), reward_tensor.detach(),
@@ -376,7 +372,8 @@ class DQNAgent(Agent):
             elif direction == "down":
                 all_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
                 current_action = (current_action + 2) % 4"""
-            current_state = torch.from_numpy(all_frames)
+            current_state = torch.from_numpy(all_frames).to(self.__nn.get_device(), dtype=torch.uint8)
+
             current_state = current_state[np.newaxis, :, :, :]
             # We add the current state to the list of current states
             current_states.append(current_state)
@@ -415,8 +412,8 @@ class DQNAgent(Agent):
         eps_min = hyperparams['eps_min']
         eps_max = hyperparams['eps_max']
         self.dqn_agent_friend = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['friendly_model'], env)
-        self.dqn_agent_enemy1 = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['times_tested'], env)
-        self.dqn_agent_enemy2 = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['times_tested'], env)
+        self.dqn_agent_enemy1 = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['enemy_model'], env)
+        self.dqn_agent_enemy2 = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['enemy_model'], env)
         # Episode-based training
         if n_episodes != 0 and n_steps == 0:
             self.__train_with_episodes(n_episodes, n_ep_running_average, target_network_update_freq,
@@ -603,9 +600,9 @@ class DQNAgent(Agent):
 
     def __store_experience(self, state, action, reward, next_state, done):
         """Store an experience tuple in the replay buffer."""
-        reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False)
-        action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False)
-        done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
+        reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+        action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+        done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
 
         exp = Experience(state.detach(), action_tensor.detach(),
                                       reward_tensor.detach(), next_state.detach(),

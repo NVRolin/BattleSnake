@@ -21,7 +21,7 @@ if __name__ == "__main__":
         base_params = {
             'n_episodes': 20000,
             'n_steps': 0,
-            'buffer_size': 200000,
+            'buffer_size': 20000,
             'hidden_size': 512,
             'device': "cuda",
             'discount_factor': 0.999,
@@ -32,9 +32,9 @@ if __name__ == "__main__":
             'eps_min': 0.1,
             'eps_max': 1,
             'n_frames': 13,
-            'times_tested': "./models/experiments/_11",
+            'times_tested': 1,
             'friendly_model': "./models/experiments/_11",
-            'enemy_model': 1,
+            'enemy_model': "./models/experiments/_11",
             'env': env_name,
             'seed': seed
         }
