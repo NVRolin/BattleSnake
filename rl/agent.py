@@ -77,7 +77,7 @@ class DQNAgent(Agent):
         self.__total_steps = 0
         device = neural_network.get_device()
         self.__nn = neural_network.to(device)
-        self.__discount_factor = torch.tensor(discount_factor, device=self.__nn.get_device(), requires_grad=False)
+        self.__discount_factor = discount_factor
         # Save the params used by the agent for loading and saving.
         self.__params_used = {}
         self.__params_used["buffer_size"] = buffer_size
@@ -175,9 +175,9 @@ class DQNAgent(Agent):
             N)  # take N samples from the buffer
         state = state.to(self.__nn.get_device(), dtype=torch.float32) / 255.0
         action = action.to(self.__nn.get_device(), dtype=torch.int64)
-        reward = reward.to(self.__nn.get_device(), dtype=torch.int64)
+        reward = reward.to(self.__nn.get_device(), dtype=torch.float32)
         next_state = next_state.to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-        done = done.to(self.__nn.get_device())
+        done = done.to(self.__nn.get_device(), dtype=torch.bool)
         # We want to get the maximum along the second dimension of the tensor, and [0] accesses the value not the indices of the tensor.
         """for i in range(len(reward)):
             if done[i]:
@@ -365,6 +365,7 @@ class DQNAgent(Agent):
                 shorter_size_frame,
                 *alive_count_frames
             ], axis=0)
+
             # We want to always face up to reduce state space
             """if direction == "right":
                 all_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
@@ -379,6 +380,7 @@ class DQNAgent(Agent):
             current_state = current_state[np.newaxis, :, :, :]
             # We add the current state to the list of current states
             current_states.append(current_state)
+
         return current_states, current_action
 
     def __running_average(self, x, N):

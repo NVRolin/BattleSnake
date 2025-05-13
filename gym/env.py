@@ -39,13 +39,25 @@ class BattlesnakeEnv:
         self.turns = 0
         self.target_lengths = []
 
-        placements = [
+        placements1 = [
+            (5, 1),
+            (1, 5),
+            (5, 9),
+            (9, 5),
+        ]
+        placements2 = [
             (1, 1),
             (self.board_size - 2, self.board_size - 2),
             (1, self.board_size - 2),
             (self.board_size - 2, 1),
         ]
+        if random.random() < 0.5:
+            placements = placements1
+        else:
+            placements = placements2
+        random.shuffle(placements)
         for i in range(self.n_snakes):
+            # Shuffle the placements
             x, y = placements[i]
             self.snakes.append([(x, y)])
             self.board[y, x] = 2 + i

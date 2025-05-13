@@ -46,6 +46,8 @@ def convert_state_to_frames(obs, board_size, snake_idx=0):
     for i, snake in enumerate(obs["snakes"]):
         if not obs["alive"][i]:
             continue
+        if i != 0:
+            alive_count_frames[i-1].fill(0)
         for j, (x, y) in enumerate(snake):
             bin_body_frame[y, x] = 255
             segment_body_frame[y, x] = j
@@ -96,8 +98,8 @@ def convert_state_to_frames(obs, board_size, snake_idx=0):
         shorter_size_frame,
         *alive_count_frames
     ], axis=0)
-    plt.imshow(np.array(all_frames[7]))
-    plt.show()
+
+
     state_tensor = torch.from_numpy(all_frames)
     state_tensor = state_tensor.unsqueeze(0)
 
@@ -143,18 +145,27 @@ if __name__ == "__main__":
     if use_default and len(models) >= 2:
         model1_path = models[0]
         model2_path = models[0]
+        model3_path = models[0]
+        model4_path = models[0]
     else:
         model1_path = choose_model(models, 1)
         model2_path = choose_model(models, 2)
+        model3_path = choose_model(models, 3)
+        model4_path = choose_model(models, 4)
     
     print(f"\nLoading Model 1 from: {model1_path}")
     snake1 = load_trained_model(model1_path)
     
     print(f"Loading Model 2 from: {model2_path}")
     snake2 = load_trained_model(model2_path)
-    
+
+    print(f"\nLoading Model 33 from: {model3_path}")
+    snake3 = load_trained_model(model3_path)
+
+    print(f"Loading Model 4 from: {model4_path}")
+    snake4 = load_trained_model(model4_path)
     BOARD_SIZE = 11
-    N_SNAKES = 2
+    N_SNAKES = 4
     
     env = BattlesnakeEnv(board_size=BOARD_SIZE, n_snakes=N_SNAKES)
     renderer = BattlesnakeRenderer(
@@ -168,7 +179,7 @@ if __name__ == "__main__":
     running = True
     turn = 0
     rewards_total = [0, 0]
-    prev_food_frame = np.zeros((11, 11), dtype=np.uint8)
+    prev_food_frame = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=np.uint8)
     print("\nStarting match...")
     try:
         while running:
@@ -192,7 +203,22 @@ if __name__ == "__main__":
                     actions.append(action2)
                 else:
                     actions.append(0)
-                
+
+                if obs['alive'][2]:
+                    state_tensor = convert_state_to_frames(obs, BOARD_SIZE, snake_idx=0)
+                    action3 = snake3._forward(state_tensor, 0)
+                    actions.append(action3)
+                else:
+                    actions.append(0)
+
+                if obs['alive'][3]:
+                    state_tensor = convert_state_to_frames(obs, BOARD_SIZE, snake_idx=1)
+                    action4 = snake4._forward(state_tensor, 0)
+                    actions.append(action4)
+                else:
+                    actions.append(0)
+
+
                 new_obs, rewards, done, info = env.step(actions)
                 
                 rewards_total[0] += rewards[0]

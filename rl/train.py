@@ -19,21 +19,21 @@ if __name__ == "__main__":
         desc = "Basic save and load test"
 
         base_params = {
-            'n_episodes': 2000,
+            'n_episodes': 20000,
             'n_steps': 0,
-            'buffer_size': 20000,
+            'buffer_size': 200000,
             'hidden_size': 512,
             'device': "cuda",
             'discount_factor': 0.999,
             'n_ep_running_average': 10,
             'alpha': 0.001,
-            'target_network_update_freq': 500,
+            'target_network_update_freq': 50,
             'batch_size': 32,
             'eps_min': 0.1,
             'eps_max': 1,
             'n_frames': 13,
-            'times_tested': "./models/experiments/_15",
-            'friendly_model': "./models/experiments/_15",
+            'times_tested': "./models/experiments/_11",
+            'friendly_model': "./models/experiments/_11",
             'enemy_model': 1,
             'env': env_name,
             'seed': seed
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         dqn_agent.test_policy(env,20)
     else:
         # Load the model and parameters
-        path = "./models/experiments/_15"
+        path = "./models/experiments/_11"
         dual = True
         if dual is True:
             env = gym.env.BattlesnakeEnv(11,4)
