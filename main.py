@@ -13,10 +13,10 @@ from rl.agent import DQNAgent
 RL_MODEL = None
 MOVE_MAPPING = ["up", "down", "left", "right"]
 
-def load_model(board_size):
-    model_path = f"rl/models/candidates/_{board_size}"
+def load_model():
+    model_path = f"rl/models/candidates/_11"
 
-    assert os.path.exists(model_path), "No models found in rl/models/candidates"
+    assert os.path.exists(model_path), "No model found in rl/models/candidates"
     
     class tempEnv:
         ACTIONS = [0, 1, 2, 3]
@@ -145,7 +145,7 @@ def start(game_state: typing.Dict):
     prev_food_frame = np.zeros((board_width, board_width), dtype=np.uint8)
     player_ids = [snake["id"] for snake in game_state["board"]["snakes"] if snake["id"] != game_state["you"]["id"]]
 
-    RL_MODEL = load_model(board_width)
+    RL_MODEL = load_model()
 
 
 # end is called when your Battlesnake finishes a game
@@ -161,92 +161,68 @@ def move(game_state: typing.Dict) -> typing.Dict:
     global RL_MODEL, MOVE_MAPPING
     
     if RL_MODEL is None:
-        board_size = game_state["board"]["width"]
-        RL_MODEL = load_model(board_size)
+        RL_MODEL = load_model()
     
     state_tensor = convert_state_to_frames(game_state)
     actions = RL_MODEL._forward_queue(state_tensor)
     
-    is_move_safe = {"up": True, "down": True, "left": True, "right": True}
+    move_danger = {"up": 0, "down": 0, "left": 0, "right": 0}
     my_head = game_state["you"]["head"]
-    my_body = game_state["you"]["body"]
-    board_width = game_state["board"]["width"]
-    board_height = game_state["board"]["height"]
+    my_size = len(game_state["you"]["body"])
     
-    # Do not move out of bounds
-    if my_head["y"] == board_height - 1:
-        is_move_safe["up"] = False
-    if my_head["y"] == 0:
-        is_move_safe["down"] = False
-    if my_head["x"] == 0:
-        is_move_safe["left"] = False
-    if my_head["x"] == board_width - 1:
-        is_move_safe["right"] = False
+    # Define potential moves
+    potential_moves = {
+        "up": {"x": my_head["x"], "y": my_head["y"] + 1},
+        "down": {"x": my_head["x"], "y": my_head["y"] - 1},
+        "left": {"x": my_head["x"] - 1, "y": my_head["y"]},
+        "right": {"x": my_head["x"] + 1, "y": my_head["y"]}
+    }
     
-    # Do not backwards into your own neck
-    if len(my_body) > 1:
-        my_neck = my_body[1]
-        if my_neck["x"] < my_head["x"]:
-            is_move_safe["left"] = False
-        elif my_neck["x"] > my_head["x"]:
-            is_move_safe["right"] = False
-        elif my_neck["y"] < my_head["y"]:
-            is_move_safe["down"] = False
-        elif my_neck["y"] > my_head["y"]:
-            is_move_safe["up"] = False
-    
-    # Do not collide with yourself
-    for segment in my_body[1:-1]:
-        if my_head["x"] == segment["x"] and my_head["y"] + 1 == segment["y"]:
-            is_move_safe["up"] = False
-        if my_head["x"] == segment["x"] and my_head["y"] - 1 == segment["y"]:
-            is_move_safe["down"] = False
-        if my_head["x"] - 1 == segment["x"] and my_head["y"] == segment["y"]:
-            is_move_safe["left"] = False
-        if my_head["x"] + 1 == segment["x"] and my_head["y"] == segment["y"]:
-            is_move_safe["right"] = False
-    
-    # Do not collide with other snakes
-    for snake in game_state["board"]["snakes"]:
-        if snake["id"] == game_state["you"]["id"]:
+    for dir, pos in potential_moves.items():
+        x, y = pos["x"], pos["y"]
+        # Out of bounds check
+        if x < 0 or x >= game_state["board"]["width"] or y < 0 or y >= game_state["board"]["height"]:
+            move_danger[dir] = 1
             continue
-    
-        for segment in snake["body"]:
-            if my_head["x"] == segment["x"] and my_head["y"] + 1 == segment["y"]:
-                is_move_safe["up"] = False
-            if my_head["x"] == segment["x"] and my_head["y"] - 1 == segment["y"]:
-                is_move_safe["down"] = False
-            if my_head["x"] - 1 == segment["x"] and my_head["y"] == segment["y"]:
-                is_move_safe["left"] = False
-            if my_head["x"] + 1 == segment["x"] and my_head["y"] == segment["y"]:
-                is_move_safe["right"] = False
-    
-    # Avoid head-on with smaller enemies
-    deltas = {"up": (0, 1), "down": (0, -1), "left": (-1, 0), "right": (1, 0)}
-    for snake in game_state["board"]["snakes"]:
-        if snake["id"] == game_state["you"]["id"]:
+            
+        # Neck check
+        if len(game_state["you"]["body"]) > 1 and x == game_state["you"]["body"][1]["x"] and y == game_state["you"]["body"][1]["y"]:
+            move_danger[dir] = 1
             continue
-        if len(snake["body"]) >= len(my_body):
-            e_head = snake["head"]
-            e_body = snake["body"]
-            e_neck = e_body[1] if len(e_body) > 1 else None
-            for d, (dx, dy) in deltas.items():
-                tx, ty = e_head["x"] + dx, e_head["y"] + dy
-                if e_neck and tx == e_neck["x"] and ty == e_neck["y"]:
-                    continue
-                if not (0 <= tx < board_width and 0 <= ty < board_height):
-                    continue
-                for m, (mx, my) in deltas.items():
-                    if my_head["x"] + mx == tx and my_head["y"] + my == ty:
-                        is_move_safe[m] = False
+        
+        # Check potential collisions
+        for snake in game_state["board"]["snakes"]:
 
+            # Body collisions
+            for segment in snake["body"][1:]:
+                if x == segment["x"] and y == segment["y"]:
+                    move_danger[dir] = 1
+                    
+            # Enemy head immediate collisions
+            if snake["id"] != game_state["you"]["id"] and x == snake["head"]["x"] and y == snake["head"]["y"]:
+                move_danger[dir] = 1
+                
+            # Potential head-on collisions with larger, equal snakes
+            if snake["id"] != game_state["you"]["id"] and len(snake["body"]) >= my_size:
+                enemy_head = snake["head"]
+
+                for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+                    enemy_x, enemy_y = enemy_head["x"] + dx, enemy_head["y"] + dy
+
+                    if x == enemy_x and y == enemy_y and move_danger[dir] < 0.5:
+                        move_danger[dir] = 0.5
+    
     next_move = None
+    best_danger = 1.1
+    
     for action in actions:
         move_option = MOVE_MAPPING[action]
-        if is_move_safe[move_option]:
+        if move_danger[move_option] < best_danger:
             next_move = move_option
-            break
-
+            best_danger = move_danger[move_option]
+            if best_danger == 0:
+                break
+    
     if next_move is None:
         next_move = MOVE_MAPPING[actions[0]]
     
