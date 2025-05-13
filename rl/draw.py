@@ -1,4 +1,4 @@
-from rl.renderer import BattlesnakeRenderer
+from gym.renderer import BattlesnakeRenderer
 
 class DrawBattlesnakeEnvironment:
     def __init__(self, env):

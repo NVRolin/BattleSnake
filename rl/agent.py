@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
-from pygments.styles.dracula import foreground
-
 print("Torch version:",torch.__version__)
 from tqdm import trange
 import torch.optim as optim
@@ -11,9 +9,9 @@ import json
 from datetime import datetime
 import numpy as np
 import copy
-import replayBuffer
-import model
-import draw
+from rl.draw import *
+from rl.replayBuffer import *
+from rl.model import *
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter("runs/DQN")
 class Agent(object):
@@ -74,7 +72,7 @@ class DQNAgent(Agent):
     def __init__(self, discount_factor, buffer_size, neural_network, optimizer, n_actions, n_frames):
         super(DQNAgent, self).__init__(n_actions)
 
-        self.__experience_replay_buffer = replayBuffer.ExperienceReplayBuffer(capacity=buffer_size)  # init the exp replay buffer
+        self.__experience_replay_buffer = ExperienceReplayBuffer(capacity=buffer_size)  # init the exp replay buffer
         self.__n_frames = n_frames
         self.__steps = 0
         self.__total_steps = 0
@@ -266,7 +264,7 @@ class DQNAgent(Agent):
             done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
 
             # Form Experience tuple from state, action, reward, next_state, done, and append it to the buffer
-            exp = replayBuffer.Experience(stacked_state.detach(), action_for_frames_tensor.detach(), reward_tensor.detach(),
+            exp = Experience(stacked_state.detach(), action_for_frames_tensor.detach(), reward_tensor.detach(),
                                           stacked_next_state.detach(), done_tensor.detach())
             self.__experience_replay_buffer.append(exp)
             if done:
@@ -599,7 +597,7 @@ class DQNAgent(Agent):
         action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False)
         done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False)
 
-        exp = replayBuffer.Experience(state.detach(), action_tensor.detach(),
+        exp = Experience(state.detach(), action_tensor.detach(),
                                       reward_tensor.detach(), next_state.detach(),
                                       done_tensor.detach())
         self.__experience_replay_buffer.append(exp)
@@ -684,7 +682,7 @@ class DQNAgent(Agent):
         Rewards = []
         try:
             for i in range(n_episodes):
-                draw_env = draw.DrawBattlesnakeEnvironment(env1)
+                draw_env = DrawBattlesnakeEnvironment(env1)
                 Rewards.append(draw_env.run(self))
                 draw_env.reset()
             draw_env.close()
@@ -787,7 +785,7 @@ class DQNAgent(Agent):
         if self.__params_used['device'] == "cuda":  # test i we can run cuda, if not we use cpu
             print("Is CUDA enabled?", torch.cuda.is_available())
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        main_network = model.DQNetworkCNN(self.__params_used['output_size'], self.__params_used['input_size'],
+        main_network = DQNetworkCNN(self.__params_used['output_size'], self.__params_used['input_size'],
                                        self.__params_used['hidden_size'], device)
         main_network = main_network.to(main_network.get_device())  # Move main network to Device
         print("Using: " + str(main_network.get_device()))

@@ -3,7 +3,7 @@ import torch
 import torch.optim as optim
 import model
 import agent
-import rl.env
+import gym.env
 device = torch.device('cuda')
 if __name__ == "__main__":
 
@@ -13,7 +13,7 @@ if __name__ == "__main__":
     seed = None
     np.random.seed(seed)
     if do_train is True:
-        env = rl.env.BattlesnakeEnv(11,4)
+        env = gym.env.BattlesnakeEnv(11,4)
         env_name = env.NAME
         n_actions = len(env.ACTIONS)
         desc = "Basic save and load test"
@@ -57,7 +57,7 @@ if __name__ == "__main__":
                                    n_actions, base_params['n_frames'])
         dqn_agent.train_policy(base_params, env)
         dqn_agent.save_model_and_parameters(save_dir=path, desc=desc)
-        env = rl.env.BattlesnakeEnv(11,4)
+        env = gym.env.BattlesnakeEnv(11,4)
 
         dqn_agent.test_policy(env,20)
     else:
@@ -65,9 +65,9 @@ if __name__ == "__main__":
         path = "./models/Battlesnake/_15"
         dual = True
         if dual is True:
-            env = rl.env.BattlesnakeEnv(11,4)
+            env = gym.env.BattlesnakeEnv(11,4)
         else:
-            env = rl.env.BattlesnakeEnv(11,1)
+            env = gym.env.BattlesnakeEnv(11,1)
         dqn_agent = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env)
         if dual:
             dqn_agent.dqn_agent_friend = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env)
