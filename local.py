@@ -5,6 +5,8 @@ import numpy as np
 import json
 import time
 import pygame
+from matplotlib import pyplot as plt
+
 from rl.agent import DQNAgent
 from gym.env import BattlesnakeEnv
 from gym.renderer import BattlesnakeRenderer
@@ -20,8 +22,8 @@ def load_trained_model(model_dir):
     return DQNAgent.load_models_and_parameters_DQN_CNN(model_dir, env)
 
 def convert_state_to_frames(obs, board_size, snake_idx=0):
+    global prev_food_frame
     B = board_size
-    
     health_frame = np.zeros((B, B), dtype=np.uint8)
     bin_body_frame = np.zeros((B, B), dtype=np.uint8)
     segment_body_frame = np.zeros((B, B), dtype=np.uint8)
@@ -57,16 +59,30 @@ def convert_state_to_frames(obs, board_size, snake_idx=0):
     
     head_x, head_y = obs["snakes"][snake_idx][0]
     agent_head_frame[head_y, head_x] = 255
-    
+
+    eaten_food_positions = np.where((prev_food_frame == 255) & (food_frame == 0))
+    for i in range(len(eaten_food_positions[0])):
+        eaten_y = eaten_food_positions[0][i]
+        eaten_x = eaten_food_positions[1][i]
+
+        for i, snake in enumerate(obs["snakes"]):
+            head_x, head_y = snake[0]
+
+            if head_x == eaten_x and head_y == eaten_y:
+                tail_x, tail_y = snake[-1]
+                double_tail_frame[tail_y, tail_x] = 255
+                break
     for x, y in obs["food"]:
         food_frame[y, x] = 255
-    
+    prev_food_frame = food_frame.copy()
     alive_flags = obs["alive"]
     alive_count = sum(alive_flags)
     other_alive = alive_count - 1
     idx = max(0, min(other_alive-1, 2))
     alive_count_frames[idx, :, :] = 255
-    
+
+
+
     all_frames = np.stack([
         health_frame,
         bin_body_frame,
@@ -80,11 +96,15 @@ def convert_state_to_frames(obs, board_size, snake_idx=0):
         shorter_size_frame,
         *alive_count_frames
     ], axis=0)
-    
+    plt.imshow(np.array(all_frames[7]))
+    plt.show()
     state_tensor = torch.from_numpy(all_frames)
     state_tensor = state_tensor.unsqueeze(0)
-    
+
     return state_tensor
+
+
+
 
 def list_available_models():
     models = []
@@ -111,8 +131,9 @@ def choose_model(models, player):
     return models[0]
 
 if __name__ == "__main__":
+    global prev_food_frame
     models = list_available_models()
-    
+
     if not models:
         print("No models found in rl/models/candidates directory")
         sys.exit(1)
@@ -147,7 +168,7 @@ if __name__ == "__main__":
     running = True
     turn = 0
     rewards_total = [0, 0]
-    
+    prev_food_frame = np.zeros((11, 11), dtype=np.uint8)
     print("\nStarting match...")
     try:
         while running:
