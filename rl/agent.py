@@ -9,7 +9,6 @@ import json
 from datetime import datetime
 import numpy as np
 import copy
-from rl.draw import *
 from rl.replayBuffer import *
 from rl.model import *
 from torch.utils.tensorboard import SummaryWriter
@@ -141,6 +140,16 @@ class DQNAgent(Agent):
             self.__last_action = action.item()
 
         return self.__last_action
+    
+    @torch.no_grad()
+    def _forward_queue(self, state):
+        state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
+        q_values = self.__nn(state)
+        sorted_actions = torch.argsort(q_values, descending=True)
+        action_list = sorted_actions.cpu().numpy().flatten().tolist()
+        self.__last_action = action_list[0]
+        
+        return action_list
 
     @torch.no_grad()
     def _forwardBoltz(self, state, tau):
