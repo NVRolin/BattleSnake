@@ -19,9 +19,9 @@ if __name__ == "__main__":
         desc = "Basic save and load test"
 
         base_params = {
-            'n_episodes': 100000,
+            'n_episodes': 5000,
             'n_steps': 0,
-            'buffer_size': 800000,
+            'buffer_size': 80000,
             'hidden_size': 512,
             'device': "cuda",
             'discount_factor': 0.999,

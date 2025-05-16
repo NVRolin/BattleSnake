@@ -1,3 +1,6 @@
+import time
+
+import numpy
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
@@ -125,22 +128,24 @@ class DQNAgent(Agent):
     """
 
     @torch.no_grad()
-    def _forward(self, state, epsilon,index):  # forward pass for DQN+CNN
+    def _forward(self, state, epsilon,head_positions,state_tensor=None):  # forward pass for DQN+CNN
         if np.random.random() < epsilon:  # random action
             candidates = [0,1,2,3]
             random.shuffle(candidates)
-            self.choose_action(candidates, state, index,True)
+            state = state / 255.0
+            candidates_tensor = torch.tensor(candidates, dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+            self.choose_action(candidates_tensor, state, head_positions,True)
+
         else:  # greedy action
-            # with profiler.profile(with_stack=True, profile_memory=True) as PROF:
-            state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-            candidates = self.__nn(state)
+            state_tensor = torch.unsqueeze(state_tensor.to(dtype=torch.float32) / 255.0, 0)
+            candidates_tensor = torch.squeeze(self.__nn(state_tensor),0)
             # writer.add_graph(self.__nn, state)
             # writer.close()
             # print(q_values)
             # detatch returns the state tensor without the gradient, so it has no attachments with the current gradients.
 
-
-            self.choose_action(candidates,state,index)
+            state = state / 255.0
+            self.choose_action(candidates_tensor,state,head_positions)
 
         return self.__last_action
     
@@ -234,61 +239,52 @@ class DQNAgent(Agent):
         # so instead, you can fill it initially by choosing uniformly random actions
         env.reset()
         action_for_frames = []
-        stacked_state,action_for_frames = self.__stack_frames(env,action_for_frames,True)
-        stacked_state = stacked_state[0]
+        # Get current state
+        state,action_for_frames = self._stack_frames(env,action_for_frames)
         print("Filling buffer...")
-        for i in range(self.__experience_replay_buffer.get_capacity()):
+        start_time = time.time()
+        for i in trange(self.__experience_replay_buffer.get_capacity(), desc="Filling Buffer"):
             # Current state frame processing
             # We compute the action for the current state.
             action_for_frames = []
-            agentAction = np.random.randint(self._n_actions)
+            start_time = time.time()
+            agentAction = self._forward(state[0], 1,self.head_positions[0])
             action_for_frames.append(agentAction)
+
+
             # Get action for friendly agent
             if self.dqn_agent_friend is not None:
-                action_for_frames.append(np.random.randint(self._n_actions))
+                action_for_frames.append(self._forward(state[1], 1,self.head_positions[1]))
             # Get action for enemy agent 1
             if self.dqn_agent_enemy1 is not None:
-                action_for_frames.append(np.random.randint(self._n_actions))
+                action_for_frames.append(self._forward(state[2], 1,self.head_positions[2]))
             # Get action for enemy agent 2
             if self.dqn_agent_enemy2 is not None:
-                action_for_frames.append(np.random.randint(self._n_actions))
-
-            # plt.imshow(np.array(state.squeeze(0)[0].cpu()))
-            # plt.show()
+                action_for_frames.append(self._forward(state[3], 1,self.head_positions[3]))
             # We stack the frame with the action for the current state.
-            # The method will append frames for the first frames in a episode
-            # Next state
-            next_state, reward, terminal, _ = env.step(action_for_frames)
+            # We step the environment
+            _, reward, done, _ = env.step(action_for_frames)
             reward = reward[0]
-            done = terminal
+            # next state processing
+            stacked_next_state,action_for_frames = self._stack_frames(env, action_for_frames)
+            # Store the experience in the buffer
+            state_tensor = torch.tensor(state[0], dtype=torch.uint8, requires_grad=False,device=self.__nn.get_device())
+            next_state_tensor = torch.tensor(stacked_next_state[0], dtype=torch.uint8, requires_grad=False,device=self.__nn.get_device())
+            self.__store_experience(state_tensor, agentAction, reward, next_state_tensor, done)
+            # We check if the environment is done
             if done:
-                stacked_next_state = stacked_state
-            else:
-                # next state processing
-                stacked_next_state,action_for_frames = self.__stack_frames(env, action_for_frames,True)
-                stacked_next_state = stacked_next_state[0]
-                # if not ended, next state becomes current
-            reward_tensor = torch.tensor([reward], dtype=torch.float32, requires_grad=False,device=self.__nn.get_device())
-            action_for_frames_tensor = torch.tensor([agentAction], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
-            done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
-
-            # Form Experience tuple from state, action, reward, next_state, done, and append it to the buffer
-            exp = Experience(stacked_state.detach(), action_for_frames_tensor.detach(), reward_tensor.detach(),
-                                          stacked_next_state.detach(), done_tensor.detach())
-            self.__experience_replay_buffer.append(exp)
-            if done:
+                # If we are done we reset the environment and begin another episode
                 env.reset()
-                action_for_frames = np.random.randint(self._n_actions)
-                stacked_state,action_for_frames = self.__stack_frames(env, action_for_frames,True)
-                stacked_state = stacked_state[0]
+                state,action_for_frames = self._stack_frames(env,action_for_frames)
             else:
-                stacked_state = stacked_next_state
+                # If we are not done we set the current state to the next state
+                state = stacked_next_state
         print("Buffer filled!")
 
-    def __stack_frames(self, env, current_action,getSolo=False):
+    def _stack_frames(self, env, current_action,getSolo=False):
         # Battlesnake stackinng of frames inspired by https://medium.com/asymptoticlabs/battlesnake-post-mortem-a5917f9a3428
-        current_states = []
         obs = env.get_observation()
+        current_states = []
         if getSolo:
             maxAgents = 1
         else:
@@ -378,6 +374,7 @@ class DQNAgent(Agent):
             else:
                 direction = "up"
             agent_head_frame[head_y, head_x] = 255
+
             self.head_positions[snake_idx] = (head_x, head_y)
             all_frames = np.stack([
                 health_frame,
@@ -403,100 +400,94 @@ class DQNAgent(Agent):
             elif direction == "down":
                 all_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
                 current_action = (current_action + 2) % 4"""
-            current_state = torch.from_numpy(all_frames).to(self.__nn.get_device(), dtype=torch.uint8)
 
-            current_state = current_state[np.newaxis, :, :, :]
+            current_state = all_frames
             # We add the current state to the list of current states
             current_states.append(current_state)
+            """plt.imshow(bin_body_frame)
+            plt.show()"""
+        return np.stack(current_states, axis=0), current_action
 
-        return current_states, current_action
+    def choose_action(self, candidates, state, head_positions, random=False):
+        """
+        candidates: torch.Tensor of action-values (shape [4])
+        state: numpy array of shape [C, H, W]
+        index: agent index for head_positions lookup
+        random: whether to select randomly among unblocked moves
+        """
+        # Get agent head position
+        head_x, head_y = head_positions
 
-    def choose_action(self, candidates, state,index,random=False):
+        # Define possible moves: up, down, left, right
+        H, W = state.shape[1], state.shape[2]
+        move_cells = [
+            (max(head_y - 1, 0), head_x),
+            (min(head_y + 1, H - 1), head_x),
+            (head_y, max(head_x - 1, 0)),
+            (head_y, min(head_x + 1, W - 1))
+        ]
 
-        # We get our head from the state and all other bodies
-
-        head_x, head_y = self.head_positions[index]
-        move_cells = [(max(head_y-1,0), head_x),(min(head_y+1,10), head_x),(head_y, max(head_x-1,0)),(head_y, min(head_x+1,10))]
-
-        # check if the current move will collide with the wall
-        # moves are encoded ['up', 'down', 'left', 'right']
-        # Blocked states
-        blocked_actions = [False,False,False,False]
-        risky_actions = [False, False, False, False]
-        # if at the top disallow moving up
-        if head_y == 0:
-            blocked_actions[0] = True
-        if head_y == 10:
-            blocked_actions[1] = True
-        if head_x == 0:
-            blocked_actions[2] = True
-        if head_x == 10:
-            blocked_actions[3] = True
+        # Extract relevant state layers (numpy)
+        body_layer = state[1]
+        larger_opponent_layer = state[3]
 
 
-        # check if the current move will collide with any body
-        if state[0][1][move_cells[0]] == 1:
-            blocked_actions[0] = True
-        if state[0][1][move_cells[1]] == 1:
-            blocked_actions[1] = True
-        if state[0][1][move_cells[2]] == 1:
-            blocked_actions[2] = True
-        if state[0][1][move_cells[3]] == 1:
-            blocked_actions[3] = True
+        # Initialize mask lists
+        blocked_actions = [head_y == 0, head_y == H - 1, head_x == 0, head_x == W - 1]
+        risky_actions = [False] * 4
 
-        # check head on collisions with larger snakes for move
+        # Check collisions
+        for i, (y, x) in enumerate(move_cells):
+            if body_layer[y, x] == 1:
+                blocked_actions[i] = True
+            # Check neighbors for larger opponents
+            for ny, nx in [(max(y - 1, 0), x), (min(y + 1, H - 1), x), (y, max(x - 1, 0)), (y, min(x + 1, W - 1))]:
+                if larger_opponent_layer[ny, nx] == 1:
+                    risky_actions[i] = True
+                    break
 
-        for i in range(len(move_cells)):
-            y,x=move_cells[i]
-            if state[0][3][max(y-1,0), x] == 1:
-                risky_actions[i] = True
-            if state[0][3][min(y+1,10), x] == 1:
-                risky_actions[i] = True
-            if state[0][3][y, max(x-1,0)] == 1:
-                risky_actions[i] = True
-            if state[0][3][y, min(x+1,10)] == 1:
-                risky_actions[i] = True
-
+        # Convert boolean masks to torch tensors
+        blocked_mask = torch.tensor(blocked_actions, dtype=torch.bool, device=self.__nn.get_device())
+        risky_mask = torch.tensor(risky_actions, dtype=torch.bool, device=self.__nn.get_device())
 
         if not random:
-            blocked_mask = torch.tensor(blocked_actions, device=candidates.device, dtype=torch.bool)
-            risky_mask = torch.tensor(risky_actions, device=candidates.device, dtype=torch.bool)
-            valid_candidates = candidates.masked_fill(blocked_mask, float('-inf'))
-            # check if it is 100 percent death
-            if valid_candidates.max() == float('-inf'):
-                # if 100 percent death, choose the argmax for learning purposes
-                action = torch.argmax(candidates)
-                self.__last_action = action.item()
-            else:
-                # not 100 percent death we apply the risky mask
-                final_candidates = valid_candidates.masked_fill(risky_mask, float('-inf'))
-                # check if it is 100 percent death
-                if final_candidates.max() == float('-inf'):
-                    # if we only have risky actions, choose the argmax of the valid candidates
-                    action = torch.argmax(valid_candidates)
-                    self.__last_action = action.item()
-                else:
-                    # we choose the argmax of the final candidates
-                    action = torch.argmax(final_candidates)
-                    self.__last_action = action.item()
-            """print(index)
-            print(state[0][3])
-            print(blocked_actions)
-            print(candidates)
-            input("a"+str(self.__last_action))"""
-        else:
-            # get the candidate action with the highest q value but not blocked action
-            c_action = -1
-            for action in candidates:
-                if not blocked_actions[action]:
-                    c_action = action
-                    break
-            # if all actions are blocked, choose the first one
-            if c_action == -1:
-                c_action = candidates[0]
-            # choose the action
+            # Mask out blocked actions
+            valid_vals = candidates.clone()
+            valid_vals[blocked_mask] = float('-inf')
 
-            self.__last_action = c_action
+            # If all moves blocked, pick best unmasked
+            if torch.all(valid_vals == float('-inf')):
+                action = torch.argmax(candidates).item()
+            else:
+                # Further mask risky
+                final_vals = valid_vals.clone()
+                final_vals[risky_mask] = float('-inf')
+                # If all risky, fallback to valid_vals
+                if torch.all(final_vals == float('-inf')):
+                    action = torch.argmax(valid_vals).item()
+                else:
+                    action = torch.argmax(final_vals).item()
+
+            self.__last_action = action
+        else:
+            # select candidates that are not blocked and not risky
+            valid_mask = (~blocked_mask[candidates]) & (~risky_mask[candidates])
+            valid_candidates = candidates[valid_mask]
+
+            if valid_candidates.numel() > 0:
+                c_action = valid_candidates[0]
+            else:
+                # Step 2: not blocked
+                unblocked_mask = ~blocked_mask[candidates]
+                unblocked_candidates = candidates[unblocked_mask]
+
+                if unblocked_candidates.numel() > 0:
+                    c_action = unblocked_candidates[0]
+                else:
+                    # Step 3: all blocked, fallback
+                    c_action = candidates[0]
+
+            self.__last_action = c_action.item()  # store as Python int
     def __running_average(self, x, N):
         # Function used to compute the running average of the last N elements of a vector x
         # if x shorter than N, return zeros. Use np.convolve to find averages
@@ -643,8 +634,7 @@ class DQNAgent(Agent):
     def __run_episode(self, env, epsilon, target_network_update_freq, batch_size):
         """Run a single training episode and return stats."""
         # Reset environment
-        state = env.reset()
-
+        env.reset()
         # Initialize episode variables
         done = False
         next_action = []
@@ -654,48 +644,42 @@ class DQNAgent(Agent):
         loss = None
 
         # Stack initial frames
-        stacked_next_state,next_action = self.__stack_frames(env, next_action)
-
+        state,next_action = self._stack_frames(env, next_action)
+        state_tensor = torch.tensor(state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
         # Episode loop
         while not done:
-            # Set current state
-            stacked_state = stacked_next_state
+
             next_action = []
             # Choose action using epsilon-greedy policy
-
-            agentAction = self._forward(stacked_state[0], epsilon,0)
+            agentAction = self._forward(state[0], epsilon,self.head_positions[0],state_tensor[0])
             next_action.append(agentAction)
             if self.dqn_agent_friend is not None:
-                next_action.append(self.dqn_agent_friend._forward(stacked_state[1], 0,1))
+                next_action.append(self.dqn_agent_friend._forward(state[1], 0,self.head_positions[1],state_tensor[1]))
             # Get action for enemy agent 1
             if self.dqn_agent_enemy1 is not None:
-                next_action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0,2))
+                next_action.append(self.dqn_agent_enemy1._forward(state[2], 0,self.head_positions[2],state_tensor[2]))
             # Get action for enemy agent 2
             if self.dqn_agent_enemy2 is not None:
-                next_action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0,3))
+                next_action.append(self.dqn_agent_enemy2._forward(state[3], 0,self.head_positions[3],state_tensor[3]))
             # Take action in environment
-            if done:  # Will never happen
-                stacked_next_state = stacked_state
-            else:
-                # Get next state and reward. What are terminal and truncated? If episode ended.
-                next_state, reward, terminal_next_state, _ = env.step(next_action)
-                reward = reward[0]
-                done = terminal_next_state
-                if done:
-                    stacked_next_state = stacked_state
-                else:
-                    stacked_next_state,next_action = self.__stack_frames(env, next_action)
+
+            # Get next state and reward. What are terminal and truncated? If episode ended.
+            _, reward, done, _ = env.step(next_action)
+            reward = reward[0]
+
+            # Process next state
+            next_state,next_action = self._stack_frames(env, next_action)
+            next_state_tensor = torch.tensor(next_state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
             # Update counters and rewards
             total_episode_reward += reward
             self.__steps += 1
             self.__total_steps += 1
 
             # Store experience in replay buffer
-            """print(np.array(stacked_state[0].squeeze(0)[0].cpu()))
-            plt.imshow(np.array(stacked_state[0].squeeze(0)[0].cpu()))
+            """plt.imshow(state[0][1])
             plt.show()"""
 
-            self.__store_experience(stacked_state[0], agentAction, reward, stacked_next_state[0], done)
+            self.__store_experience(state_tensor[0], agentAction, reward, next_state_tensor[0], done)
 
             # Update neural network
             loss = self._backward(batch_size)
@@ -703,7 +687,7 @@ class DQNAgent(Agent):
             # Update target network periodically
             if self.__total_steps % target_network_update_freq == 0:
                 self.__update_target_network()
-
+            state = next_state
         # Return episode statistics
         return {
             'reward': total_episode_reward,
@@ -713,14 +697,13 @@ class DQNAgent(Agent):
                                                  len(self.__ep_reward_list) + 1)[-1]
         }
 
-    def __store_experience(self, state, action, reward, next_state, done):
+    def __store_experience(self, state_tensor, action, reward, next_state_tensor, done):
         """Store an experience tuple in the replay buffer."""
         reward_tensor = torch.tensor([reward], dtype=torch.float32, requires_grad=False,device=self.__nn.get_device())
         action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
         done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
-
-        exp = Experience(state.detach(), action_tensor.detach(),
-                                      reward_tensor.detach(), next_state.detach(),
+        exp = Experience(torch.unsqueeze(state_tensor,0).detach(), action_tensor.detach(),
+                                      reward_tensor.detach(), torch.unsqueeze(next_state_tensor,0).detach(),
                                       done_tensor.detach())
         self.__experience_replay_buffer.append(exp)
 
@@ -795,7 +778,7 @@ class DQNAgent(Agent):
         reward_next_state = reward_next_state[0]
         done_next_state = terminal_next_state
         if not done_next_state:
-            stacked_next_state,action = self.__stack_frames(env, action)
+            stacked_next_state,action = self._stack_frames(env, action)
         return action, reward_next_state, done_next_state
 
     def test_policy(self, env1, n_episodes=50):

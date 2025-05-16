@@ -208,31 +208,29 @@ if __name__ == "__main__":
             
             if not done:
                 actions = []
-                
+                state,actions = snake1._stack_frames(env, actions)
+                state_tensor = torch.tensor(state, dtype=torch.uint8, requires_grad=False,
+                                            device='cuda')
                 if obs['alive'][0]:
-                    state_tensor = convert_state_to_frames(obs, BOARD_SIZE,snake1, snake_idx=0)
-                    action1 = snake1._forward(state_tensor, 0,0)
+                    action1 = snake1._forward(state[0], 0,snake1.head_positions[0], state_tensor[0])
                     actions.append(action1)
                 else:
                     actions.append(0)
                 
                 if obs['alive'][1]:
-                    state_tensor = convert_state_to_frames(obs, BOARD_SIZE,snake2, snake_idx=1)
-                    action2 = snake2._forward(state_tensor, 0,1)
+                    action2 = snake2._forward(state[1], 0,snake1.head_positions[1], state_tensor[1])
                     actions.append(action2)
                 else:
                     actions.append(0)
 
                 if obs['alive'][2]:
-                    state_tensor = convert_state_to_frames(obs, BOARD_SIZE,snake3, snake_idx=2)
-                    action3 = snake3._forward(state_tensor, 0,2)
+                    action3 = snake3._forward(state[2], 0,snake1.head_positions[2], state_tensor[2])
                     actions.append(action3)
                 else:
                     actions.append(0)
 
                 if obs['alive'][3]:
-                    state_tensor = convert_state_to_frames(obs, BOARD_SIZE,snake4, snake_idx=3)
-                    action4 = snake4._forward(state_tensor, 0,3)
+                    action4 = snake4._forward(state[3], 0,snake1.head_positions[3], state_tensor[3])
                     actions.append(action4)
                 else:
                     actions.append(0)
