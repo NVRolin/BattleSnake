@@ -19,9 +19,9 @@ if __name__ == "__main__":
         desc = "Basic save and load test"
 
         base_params = {
-            'n_episodes': 20000,
+            'n_episodes': 100000,
             'n_steps': 0,
-            'buffer_size': 20000,
+            'buffer_size': 800000,
             'hidden_size': 512,
             'device': "cuda",
             'discount_factor': 0.999,
@@ -33,8 +33,8 @@ if __name__ == "__main__":
             'eps_max': 1,
             'n_frames': 13,
             'times_tested': 1,
-            'friendly_model': "./models/experiments/_11",
-            'enemy_model': "./models/experiments/_11",
+            'friendly_model': "./models/experiments/_7",
+            'enemy_model': "./models/experiments/_7",
             'env': env_name,
             'seed': seed
         }
@@ -59,18 +59,4 @@ if __name__ == "__main__":
         dqn_agent.save_model_and_parameters(save_dir=path, desc=desc)
         env = gym.env.BattlesnakeEnv(11,4)
 
-        dqn_agent.test_policy(env,20)
-    else:
-        # Load the model and parameters
-        path = "./models/experiments/_11"
-        dual = True
-        if dual is True:
-            env = gym.env.BattlesnakeEnv(11,4)
-        else:
-            env = gym.env.BattlesnakeEnv(11,1)
-        dqn_agent = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env)
-        if dual:
-            dqn_agent.dqn_agent_friend = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env)
-            dqn_agent.dqn_agent_enemy1 = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env)
-            dqn_agent.dqn_agent_enemy2 = agent.DQNAgent.load_models_and_parameters_DQN_CNN(path, env)
         dqn_agent.test_policy(env,20)

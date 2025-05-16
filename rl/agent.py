@@ -93,7 +93,7 @@ class DQNAgent(Agent):
         self.dqn_agent_friend = None
         self.dqn_agent_enemy1 = None
         self.dqn_agent_enemy2 = None
-
+        self.head_positions = [(0,0),(0,0),(0,0),(0,0)]
         # nn.MSELoss()
         # calculate the mean square error from the state action values between our network
         # and the target network and save it to a tensor.
@@ -125,19 +125,22 @@ class DQNAgent(Agent):
     """
 
     @torch.no_grad()
-    def _forward(self, state, epsilon):  # forward pass for DQN+CNN
+    def _forward(self, state, epsilon,index):  # forward pass for DQN+CNN
         if np.random.random() < epsilon:  # random action
-            self.__last_action = np.random.randint(self._n_actions)
+            candidates = [0,1,2,3]
+            random.shuffle(candidates)
+            self.choose_action(candidates, state, index,True)
         else:  # greedy action
             # with profiler.profile(with_stack=True, profile_memory=True) as PROF:
             state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-            q_values = self.__nn(state)
+            candidates = self.__nn(state)
             # writer.add_graph(self.__nn, state)
             # writer.close()
             # print(q_values)
             # detatch returns the state tensor without the gradient, so it has no attachments with the current gradients.
-            action = torch.argmax(q_values)
-            self.__last_action = action.item()
+
+
+            self.choose_action(candidates,state,index)
 
         return self.__last_action
     
@@ -148,7 +151,7 @@ class DQNAgent(Agent):
         sorted_actions = torch.argsort(q_values, descending=True)
         action_list = sorted_actions.cpu().numpy().flatten().tolist()
         self.__last_action = action_list[0]
-        
+
         return action_list
 
     @torch.no_grad()
@@ -166,6 +169,7 @@ class DQNAgent(Agent):
 
     def _backward(self, N):  # backward pass - based on current batch of samples update weights of agent's nn
         if self.__experience_replay_buffer.get_capacity() < N:  # not enough samples in buffer
+            print('not enough samples in buffer')
             return
         # self.nn.zero_grad()  essentially the same operation as optimizer.zero_grad(), but it's applied directly to the neural network's parameters rather than through the optimizer.
         self.__optimizer.zero_grad()  # We clear out the gradients of all parameters that the optimizer is tracking.
@@ -198,6 +202,7 @@ class DQNAgent(Agent):
         # action.view(N, 1) reshapes the action tensor to have a shape compatible with gathering.
         # N is the batch size so every action in a batch is print(action.view(N, 1))
         state_action_values = self.__nn(state).gather(1, action.view(N, 1))
+
         # We calculate the TD target using the immediate rewards with the discounted estimate optimal q value for the next state if it terminated.
         target_TD = reward + self.__discount_factor * qvalues_next_state
 
@@ -263,7 +268,7 @@ class DQNAgent(Agent):
                 stacked_next_state,action_for_frames = self.__stack_frames(env, action_for_frames,True)
                 stacked_next_state = stacked_next_state[0]
                 # if not ended, next state becomes current
-            reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+            reward_tensor = torch.tensor([reward], dtype=torch.float32, requires_grad=False,device=self.__nn.get_device())
             action_for_frames_tensor = torch.tensor([agentAction], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
             done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
 
@@ -289,7 +294,7 @@ class DQNAgent(Agent):
         else:
             maxAgents = env.n_snakes
 
-        for n in range(maxAgents):
+        for snake_idx in range(maxAgents):
             B = env.board_size
             direction = None
             # Create frame with health at head
@@ -303,6 +308,37 @@ class DQNAgent(Agent):
             double_tail_frame = np.zeros((B, B), dtype=np.uint8)
             longer_size_frame = np.zeros((B, B), dtype=np.uint8)
             shorter_size_frame = np.zeros((B, B), dtype=np.uint8)
+            alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)
+            if snake_idx == 0:
+                if obs['alive'][1]:
+                    alive_count_frames[0].fill(255)
+                if obs['alive'][2]:
+                    alive_count_frames[1].fill(255)
+                if obs['alive'][3]:
+                    alive_count_frames[2].fill(255)
+            elif snake_idx == 1:
+                if obs['alive'][0]:
+                    alive_count_frames[0].fill(255)
+                if obs['alive'][2]:
+                    alive_count_frames[1].fill(255)
+                if obs['alive'][3]:
+                    alive_count_frames[2].fill(255)
+            elif snake_idx == 2:
+                if obs['alive'][3]:
+                    alive_count_frames[0].fill(255)
+                if obs['alive'][0]:
+                    alive_count_frames[1].fill(255)
+                if obs['alive'][1]:
+                    alive_count_frames[2].fill(255)
+            elif snake_idx == 3:
+                if obs['alive'][2]:
+                    alive_count_frames[0].fill(255)
+                if obs['alive'][0]:
+                    alive_count_frames[1].fill(255)
+                if obs['alive'][1]:
+                    alive_count_frames[2].fill(255)
+
+
             for i in range(len(obs['snakes'])):
                 if not obs['alive'][i]:
                     continue
@@ -314,22 +350,23 @@ class DQNAgent(Agent):
                     x, y = snake[j]
                     bin_body_frame[y, x] = 255
                     segment_body_frame[y, x] = j
-                    if len(snake) > len(obs['snakes'][n]):
-                        longer_size_frame[y, x] = len(snake)-len(obs['snakes'][n])
-                    elif len(snake) < len(obs['snakes'][n]):
-                        shorter_size_frame[y, x] = len(obs['snakes'][n])-len(snake)
-                if len(snake) > len(obs['snakes'][n]):
+                    if len(snake) >= len(obs['snakes'][snake_idx]):
+                        longer_size_frame[y, x] = len(snake)-len(obs['snakes'][snake_idx])
+                    elif len(snake) < len(obs['snakes'][snake_idx]):
+                        shorter_size_frame[y, x] = len(obs['snakes'][snake_idx])-len(snake)
+                if len(snake) > len(obs['snakes'][snake_idx]):
                     longer_opponent_frame[head_y, head_x] = 255
                 if obs['food_eaten'][i]:
                     double_tail_x, double_tail_y = snake[-1]
                     double_tail_frame[double_tail_y, double_tail_x] = 255
             for x, y in obs['food']:
                 food_frame[y, x] = 255
-            head_x, head_y = obs['snakes'][n][0]
-            if len(obs['snakes'][n]) > 1:
-                neck_x, neck_y = obs['snakes'][n][1]
+            head_x, head_y = obs['snakes'][snake_idx][0]
+            if len(obs['snakes'][snake_idx]) > 1:
+                neck_x, neck_y = obs['snakes'][snake_idx][1]
             else:
-                neck_x, neck_y = obs['snakes'][n][0]
+                neck_x, neck_y = obs['snakes'][snake_idx][0]
+
             if neck_x < head_x:
                 direction = "right"
             elif neck_x > head_x:
@@ -341,13 +378,7 @@ class DQNAgent(Agent):
             else:
                 direction = "up"
             agent_head_frame[head_y, head_x] = 255
-            alive_flags = obs['alive']
-            alive_count = sum(alive_flags)
-            other_alive = alive_count - 1
-            idx = max(0, min(other_alive-1, 2))
-            alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)
-            alive_count_frames[idx, :, :] = 255
-
+            self.head_positions[snake_idx] = (head_x, head_y)
             all_frames = np.stack([
                 health_frame,
                 bin_body_frame,
@@ -380,6 +411,92 @@ class DQNAgent(Agent):
 
         return current_states, current_action
 
+    def choose_action(self, candidates, state,index,random=False):
+
+        # We get our head from the state and all other bodies
+
+        head_x, head_y = self.head_positions[index]
+        move_cells = [(max(head_y-1,0), head_x),(min(head_y+1,10), head_x),(head_y, max(head_x-1,0)),(head_y, min(head_x+1,10))]
+
+        # check if the current move will collide with the wall
+        # moves are encoded ['up', 'down', 'left', 'right']
+        # Blocked states
+        blocked_actions = [False,False,False,False]
+        risky_actions = [False, False, False, False]
+        # if at the top disallow moving up
+        if head_y == 0:
+            blocked_actions[0] = True
+        if head_y == 10:
+            blocked_actions[1] = True
+        if head_x == 0:
+            blocked_actions[2] = True
+        if head_x == 10:
+            blocked_actions[3] = True
+
+
+        # check if the current move will collide with any body
+        if state[0][1][move_cells[0]] == 1:
+            blocked_actions[0] = True
+        if state[0][1][move_cells[1]] == 1:
+            blocked_actions[1] = True
+        if state[0][1][move_cells[2]] == 1:
+            blocked_actions[2] = True
+        if state[0][1][move_cells[3]] == 1:
+            blocked_actions[3] = True
+
+        # check head on collisions with larger snakes for move
+
+        for i in range(len(move_cells)):
+            y,x=move_cells[i]
+            if state[0][3][max(y-1,0), x] == 1:
+                risky_actions[i] = True
+            if state[0][3][min(y+1,10), x] == 1:
+                risky_actions[i] = True
+            if state[0][3][y, max(x-1,0)] == 1:
+                risky_actions[i] = True
+            if state[0][3][y, min(x+1,10)] == 1:
+                risky_actions[i] = True
+
+
+        if not random:
+            blocked_mask = torch.tensor(blocked_actions, device=candidates.device, dtype=torch.bool)
+            risky_mask = torch.tensor(risky_actions, device=candidates.device, dtype=torch.bool)
+            valid_candidates = candidates.masked_fill(blocked_mask, float('-inf'))
+            # check if it is 100 percent death
+            if valid_candidates.max() == float('-inf'):
+                # if 100 percent death, choose the argmax for learning purposes
+                action = torch.argmax(candidates)
+                self.__last_action = action.item()
+            else:
+                # not 100 percent death we apply the risky mask
+                final_candidates = valid_candidates.masked_fill(risky_mask, float('-inf'))
+                # check if it is 100 percent death
+                if final_candidates.max() == float('-inf'):
+                    # if we only have risky actions, choose the argmax of the valid candidates
+                    action = torch.argmax(valid_candidates)
+                    self.__last_action = action.item()
+                else:
+                    # we choose the argmax of the final candidates
+                    action = torch.argmax(final_candidates)
+                    self.__last_action = action.item()
+            """print(index)
+            print(state[0][3])
+            print(blocked_actions)
+            print(candidates)
+            input("a"+str(self.__last_action))"""
+        else:
+            # get the candidate action with the highest q value but not blocked action
+            c_action = -1
+            for action in candidates:
+                if not blocked_actions[action]:
+                    c_action = action
+                    break
+            # if all actions are blocked, choose the first one
+            if c_action == -1:
+                c_action = candidates[0]
+            # choose the action
+
+            self.__last_action = c_action
     def __running_average(self, x, N):
         # Function used to compute the running average of the last N elements of a vector x
         # if x shorter than N, return zeros. Use np.convolve to find averages
@@ -546,18 +663,16 @@ class DQNAgent(Agent):
             next_action = []
             # Choose action using epsilon-greedy policy
 
-            # Display current state
-
-            agentAction = self._forward(stacked_state[0], epsilon)
+            agentAction = self._forward(stacked_state[0], epsilon,0)
             next_action.append(agentAction)
             if self.dqn_agent_friend is not None:
-                next_action.append(self.dqn_agent_friend._forward(stacked_state[1], 0))
+                next_action.append(self.dqn_agent_friend._forward(stacked_state[1], 0,1))
             # Get action for enemy agent 1
             if self.dqn_agent_enemy1 is not None:
-                next_action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0))
+                next_action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0,2))
             # Get action for enemy agent 2
             if self.dqn_agent_enemy2 is not None:
-                next_action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0))
+                next_action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0,3))
             # Take action in environment
             if done:  # Will never happen
                 stacked_next_state = stacked_state
@@ -600,7 +715,7 @@ class DQNAgent(Agent):
 
     def __store_experience(self, state, action, reward, next_state, done):
         """Store an experience tuple in the replay buffer."""
-        reward_tensor = torch.tensor([reward], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
+        reward_tensor = torch.tensor([reward], dtype=torch.float32, requires_grad=False,device=self.__nn.get_device())
         action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
         done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
 
@@ -661,16 +776,16 @@ class DQNAgent(Agent):
     def _forward_processing(self, env,action):
         stacked_state,action = self.__stack_frames(env, action)
         action = []
-        action.append(self._forward(stacked_state[0], 0))
+        action.append(self._forward(stacked_state[0], 0,0))
         # Get action for friendly agent
         if self.dqn_agent_friend is not None:
-            action.append(self.dqn_agent_friend._forward(stacked_state[1], 0))
+            action.append(self.dqn_agent_friend._forward(stacked_state[1], 0,1))
         # Get action for enemy agent 1
         if self.dqn_agent_enemy1 is not None:
-            action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0))
+            action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0,2))
         # Get action for enemy agent 2
         if self.dqn_agent_enemy2 is not None:
-            action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0))
+            action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0,3))
         """print(np.array(stacked_state[0].squeeze(0)[6].cpu()))
         print(np.array(stacked_state[1].squeeze(0)[6].cpu()))
         print(np.array(stacked_state[2].squeeze(0)[6].cpu()))
@@ -745,14 +860,17 @@ class DQNAgent(Agent):
 
     def save_model_and_parameters(self, save_dir, desc):
         # Make numerated dir for the test
+
+        # Make a new, numerically suffixed folder
         save_dir = self.__make_numerated_dir_path(save_dir)
 
         os.makedirs(save_dir)
 
+        # Stamp params
         self.__params_used['end_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Save date
         self.__params_used['desc'] = desc
 
-        # Save parameters used for training
+        # Save hyperparameters & metadata
         with open(os.path.join(save_dir, 'parameters.json'), 'w') as f:
             json.dump(self.__params_used, f, indent=4)
 
@@ -776,52 +894,62 @@ class DQNAgent(Agent):
         print("Saved!")
 
     @classmethod
-    def load_models_and_parameters_DQN_CNN(self, dir_path, env):
+    def load_models_and_parameters_DQN_CNN(cls, dir_path, env):
         if not os.path.isdir(dir_path):
-            raise Exception("Invalid path for model")
+            raise FileNotFoundError(f"No such directory: {dir_path}")
 
         # Load parameters from the 'parameters.json' file
-        params_file = os.path.join(dir_path, 'parameters.json')
-        with open(params_file, 'r') as f:
-            self.__params_used = json.load(f)
-        print(self.__params_used)
-        # Init the model from params
-        n_actions = len(env.ACTIONS)
-        # Ensure the neural network and the data are on the same device
-        print("Trying to use device:", self.__params_used['device'])
-        if self.__params_used['device'] == "cuda":  # test i we can run cuda, if not we use cpu
-            print("Is CUDA enabled?", torch.cuda.is_available())
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        params_path = os.path.join(dir_path, "parameters.json")
+        with open(params_path, "r") as f:
+            params = json.load(f)
+
+        # Reconstruct device
+        dev_str = params.get("device", "cpu")
+        if "cuda" in dev_str and torch.cuda.is_available():
+            device = torch.device(dev_str)
         else:
             device = torch.device("cpu")
-        main_network = DQNetworkCNN(self.__params_used['output_size'], self.__params_used['input_size'],
-                                       self.__params_used['hidden_size'], device)
-        main_network = main_network.to(main_network.get_device())  # Move main network to Device
-        print("Using: " + str(main_network.get_device()))
 
-        optimizer = optim.RMSprop(main_network.parameters(), lr=self.__params_used['lr'])
-        # Define DQN agent
-        dqn_agent = DQNAgent(self.__params_used['discount_factor'], self.__params_used['buffer_size'], main_network,
-                             optimizer, n_actions, self.__params_used['n_frames'])
+        # Build the main network and send to device
+        n_actions = len(env.ACTIONS)
+        main_net = DQNetworkCNN(
+            output_size=params["output_size"],
+            input_size=params["input_size"],
+            hidden_size=params["hidden_size"],
+            device=device,
+        ).to(device)
+        # Create optimizer and agent
+        optimizer = optim.RMSprop(main_net.parameters(), lr=params["lr"])
+        agent = cls(
+            discount_factor=params["discount_factor"],
+            buffer_size=params["buffer_size"],
+            neural_network=main_net,
+            optimizer=optimizer,
+            n_actions=n_actions,
+            n_frames=params["n_frames"],
+        )
+        agent.__params_used = params
 
-        # Load the trained model from the 'model.pt' file
-        model_path = os.path.join(dir_path, 'model.pt')
-        dqn_agent.__load_model(model_path)
-        # Assign the params
-        dqn_agent.__params_used = self.__params_used
-        # Load additional training data
-        try:
-            training_data_file = os.path.join(dir_path, 'training_data.json')
-            with open(training_data_file, 'r') as f:
-                training_data = json.load(f)
-            # Assign loaded training data
-            dqn_agent.__ep_reward_list = training_data['ep_reward_list']
-            dqn_agent.__ep_reward_list_RA = training_data['ep_reward_list_RA']
-            dqn_agent.__ep_steps_list = training_data['ep_steps_list']
-            dqn_agent.__loss_list = training_data['loss_list']
-            dqn_agent.__eps_list = training_data['eps_list']
-            dqn_agent.__mean_grad = training_data['mean_grad']
-        except:
-            print("Could not find train data.")
-        print("Loaded!")
-        return dqn_agent
+        # Load model + optimizer state
+        checkpoint = torch.load(os.path.join(dir_path, "model.pt"), map_location=device)
+        main_net.load_state_dict(checkpoint["neural_network_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        # Sync target network
+        agent._DQNAgent__target_nn.load_state_dict(main_net.state_dict())
+
+        # load training_data.json for plotting/resume stats
+        td_path = os.path.join(dir_path, "training_data.json")
+        if os.path.isfile(td_path):
+            with open(td_path, "r") as f:
+                td = json.load(f)
+            agent._DQNAgent__ep_reward_list = td.get("ep_reward_list", [])
+            agent._DQNAgent__ep_reward_list_RA = td.get("ep_reward_list_RA", [])
+            agent._DQNAgent__ep_steps_list = td.get("ep_steps_list", [])
+            agent._DQNAgent__loss_list = td.get("loss_list", [])
+            agent._DQNAgent__eps_list = td.get("eps_list", [])
+            agent._DQNAgent__mean_grad = td.get("mean_grad", [])
+
+        print(f"[DQNAgent] Loaded checkpoint from {dir_path} on {device}.")
+        return agent
+

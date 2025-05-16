@@ -184,7 +184,7 @@ class BattlesnakeEnv:
             if 0 <= x < self.board_size and 0 <= y < self.board_size and self.board[y, x] == 1:
                 self.food_eaten[i] = True
                 self.snake_health[i] = 100
-                rewards[i] = 1.0
+                rewards[i] = 0.01
                 self.food.remove((x, y))
                 self.board[y, x] = 0
                 self.target_lengths[i] += 1
@@ -219,11 +219,20 @@ class BattlesnakeEnv:
 
         #done = all(not alive for alive in self.snake_alive)
         # When we train we dont want to continue when our snake dies
-        done = not self.snake_alive[0]
+        done = False
+        if not self.snake_alive[0]:
+            done = True
+        # If we win we are also done
+        if not self.snake_alive[2] and not self.snake_alive[3]:
+            done = True
+            rewards[0] = 1
+
+
         info = {
             "turn": self.turns,
             "elimination_causes": self.elimination_causes.copy()
         }
+
         return self.get_observation(), rewards, done, info
 
     def spawn_food(self):
