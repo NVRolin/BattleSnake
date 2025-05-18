@@ -26,7 +26,7 @@ if __name__ == "__main__":
             'device': "cuda",
             'discount_factor': 0.999,
             'n_ep_running_average': 10,
-            'alpha': 0.003,
+            'alpha': 0.004,
             'target_network_update_freq': 50,
             'batch_size': 32,
             'eps_min': 0.1,
@@ -43,7 +43,7 @@ if __name__ == "__main__":
         if base_params['device'] == "cuda":  # test i we can run cuda, if not we use cpu
             print("Is CUDA enabled?", torch.cuda.is_available())
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        main_network = model.DQNetworkCNN(n_actions, base_params['n_frames'], base_params['hidden_size'], device)
+        main_network = model.DQNetworkCNNNEW(n_actions, base_params['n_frames'], base_params['hidden_size'], device)
         if main_network.get_device() == "cuda":
             main_network = main_network.to(
                 main_network.get_device())  # Move main network to Device for cuda to work, (Better if we do this in the mynetwork class TODO)

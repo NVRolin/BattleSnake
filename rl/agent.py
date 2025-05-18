@@ -917,7 +917,7 @@ class DQNAgent(Agent):
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         # Sync target network
-        agent._DQNAgent__target_nn.load_state_dict(main_net.state_dict())
+        agent.__target_nn.load_state_dict(main_net.state_dict())
 
         # load training_data.json for plotting/resume stats
         td_path = os.path.join(dir_path, "training_data.json")
