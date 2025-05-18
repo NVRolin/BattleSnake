@@ -6,7 +6,7 @@ from simple_agent import get_action
 
 if __name__ == "__main__":
     N_SNAKES = 4
-    BOARD_SIZE = 7
+    BOARD_SIZE = 11
 
     env = BattlesnakeEnv(seed=10, board_size=BOARD_SIZE, n_snakes=N_SNAKES)
     renderer = BattlesnakeRenderer(

@@ -40,10 +40,10 @@ class BattlesnakeEnv:
         self.target_lengths = []
 
         placements1 = [
-            (5, 1),
-            (1, 5),
-            (5, 9),
-            (9, 5),
+            (self.board_size // 2, 1),
+            (self.board_size // 2, self.board_size - 2),
+            (1, self.board_size // 2),
+            (self.board_size - 2, self.board_size // 2),
         ]
         placements2 = [
             (1, 1),
