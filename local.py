@@ -119,9 +119,9 @@ def convert_state_to_frames(obs, board_size,agent, snake_idx=0):
         shorter_size_frame,
         *alive_count_frames
     ], axis=0)
+
     state_tensor = torch.from_numpy(all_frames)
     state_tensor = state_tensor.unsqueeze(0)
-
     return state_tensor
 
 
@@ -208,8 +208,8 @@ if __name__ == "__main__":
             
             if not done:
                 actions = []
-                state,actions = snake1._stack_frames(env, actions)
-                state_tensor = torch.tensor(state, dtype=torch.uint8, requires_grad=False,
+                state,rot_state,actions = snake1._stack_frames(env, actions)
+                state_tensor = torch.tensor(rot_state, dtype=torch.uint8, requires_grad=False,
                                             device='cuda')
                 if obs['alive'][0]:
                     action1 = snake1._forward(state[0], 0,snake1.head_positions[0], state_tensor[0])

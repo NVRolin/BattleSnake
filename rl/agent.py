@@ -97,6 +97,7 @@ class DQNAgent(Agent):
         self.dqn_agent_enemy1 = None
         self.dqn_agent_enemy2 = None
         self.head_positions = [(0,0),(0,0),(0,0),(0,0)]
+        self.scaler = torch.amp.GradScaler('cuda')
         # nn.MSELoss()
         # calculate the mean square error from the state action values between our network
         # and the target network and save it to a tensor.
@@ -137,8 +138,8 @@ class DQNAgent(Agent):
             self.choose_action(candidates_tensor, state, head_positions,True)
 
         else:  # greedy action
-            state_tensor = torch.unsqueeze(state_tensor.to(dtype=torch.float32) / 255.0, 0)
-            candidates_tensor = torch.squeeze(self.__nn(state_tensor),0)
+            state_tensor = state_tensor.to(dtype=torch.float32).div_(255.0).unsqueeze(0)
+            candidates_tensor = self.__nn(state_tensor).squeeze(0)
             # writer.add_graph(self.__nn, state)
             # writer.close()
             # print(q_values)
@@ -173,20 +174,16 @@ class DQNAgent(Agent):
         return self.__last_action
 
     def _backward(self, N):  # backward pass - based on current batch of samples update weights of agent's nn
-        if self.__experience_replay_buffer.get_capacity() < N:  # not enough samples in buffer
+        if len(self.__experience_replay_buffer) < N:  # not enough samples in buffer
             print('not enough samples in buffer')
             return
         # self.nn.zero_grad()  essentially the same operation as optimizer.zero_grad(), but it's applied directly to the neural network's parameters rather than through the optimizer.
         self.__optimizer.zero_grad()  # We clear out the gradients of all parameters that the optimizer is tracking.
         # Not calling it can lead to incorrect gradient computations since we only want to compute the gradients for a single batch.
 
-        state, action, reward, next_state, done = self.__experience_replay_buffer.sample_batch(
-            N)  # take N samples from the buffer
-        state = state.to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-        action = action.to(self.__nn.get_device(), dtype=torch.int64)
-        reward = reward.to(self.__nn.get_device(), dtype=torch.float32)
-        next_state = next_state.to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-        done = done.to(self.__nn.get_device(), dtype=torch.bool)
+        state_uint8, action, reward, next_state_uint8, done,indices,weights = self.__experience_replay_buffer.sample_batch(N)  # take N samples from the buffer
+        state = state_uint8.to(torch.float32).div_(255.0)
+        next_state = next_state_uint8.to(torch.float32).div_(255.0)
         # We want to get the maximum along the second dimension of the tensor, and [0] accesses the value not the indices of the tensor.
         """for i in range(len(reward)):
             if reward[i].item() != 0:
@@ -196,36 +193,36 @@ class DQNAgent(Agent):
                 plt.show()
                 plt.imshow(np.array(next_state.squeeze(0)[i][1].cpu()))
                 plt.show()"""
-        with torch.no_grad():  # Detach qvalues_next_state from the computation graph
-            """print(next_state.shape)"""
-            qvalues_next_state = self.__target_nn(next_state).max(dim=1)[0]
-
-        # We want to get the state action values from the neural network
-        # After passing the state through the neural network, we get a tensor of Q-values for all actions.
-        # we want to select the Q-value corresponding to the action that was actually taken.
-        # This is done using the gather operation: At the second(1) dimension
-        # action.view(N, 1) reshapes the action tensor to have a shape compatible with gathering.
-        # N is the batch size so every action in a batch is print(action.view(N, 1))
-        state_action_values = self.__nn(state).gather(1, action.view(N, 1))
-
-        # We calculate the TD target using the immediate rewards with the discounted estimate optimal q value for the next state if it terminated.
-        target_TD = reward + self.__discount_factor * qvalues_next_state
-
-        target_values = done * reward + (~done) * target_TD
-
-        # state_action_values.view(-1) flattens the tensor to 1 dim
-        # We compute the loss with optimizer specified with self.loss
-        loss = self.__loss(state_action_values.view(-1), target_values.detach())
-        # loss = self.__loss(state_action_values, target_values.unsqueeze(1))
-        loss.backward()  # Computes the gradient of the loss tensor.
-        ret_loss = loss.cpu().detach()  # We return the loss for plotting purposes
+        """with torch.no_grad():  # Detach qvalues_next_state from the computation graph
+            qvalues_next_state = self.__target_nn(next_state).max(dim=1)[0]"""
+        with torch.amp.autocast('cuda'):
+            q = self.__nn(state)  # [N, A]
+            # We want to get the state action values from the neural network
+            # After passing the state through the neural network, we get a tensor of Q-values for all actions.
+            # we want to select the Q-value corresponding to the action that was actually taken.
+            # This is done using the gather operation: At the second(1) dimension
+            # action.view(N, 1) reshapes the action tensor to have a shape compatible with gathering.
+            # N is the batch size so every action in a batch is print(action.view(N, 1))
+            state_action_values = q.gather(1, action.view(N, 1)).view(-1)  # [N]
+            next_q = self.__target_nn(next_state).max(1)[0]  # [N]
+            # We calculate the TD target using the immediate rewards with the discounted estimate optimal q value for the next state if it terminated.
+            td_target = reward + self.__discount_factor * next_q * (~done)
+            # We compute the loss with optimizer specified with self.loss
+            loss = self.__loss(state_action_values, td_target.detach())
+        self.scaler.scale(loss).backward() # Computes the gradient of the loss tensor.
         torch.nn.utils.clip_grad_norm_(self.__nn.parameters(),
                                        1)  # We clip the gradient to avoid the exploding gradient phenomenon.
-        self.__optimizer.step()  # we compute the back propagation
+        self.scaler.step(self.__optimizer) # we compute the back propagation
+        self.scaler.update()
 
+        # compute new priorities
+        with torch.no_grad():
+            new_errors = (state_action_values - td_target).abs().cpu().numpy()
+        # update the sampled transitions’ priorities
+        self.__experience_replay_buffer.update_priorities(indices, new_errors)
         for p in self.__nn.parameters():
             self.__gradients.append(float(p.grad.norm().detach().cpu()))
-        return ret_loss
+        return loss.detach().cpu()
 
     def __update_target_network(self):
         self.__target_nn.load_state_dict(
@@ -240,14 +237,13 @@ class DQNAgent(Agent):
         env.reset()
         action_for_frames = []
         # Get current state
-        state,action_for_frames = self._stack_frames(env,action_for_frames)
+        state,rot_state,action_for_frames = self._stack_frames(env,action_for_frames)
         print("Filling buffer...")
         start_time = time.time()
         for i in trange(self.__experience_replay_buffer.get_capacity(), desc="Filling Buffer"):
             # Current state frame processing
             # We compute the action for the current state.
             action_for_frames = []
-            start_time = time.time()
             agentAction = self._forward(state[0], 1,self.head_positions[0])
             action_for_frames.append(agentAction)
 
@@ -266,25 +262,33 @@ class DQNAgent(Agent):
             _, reward, done, _ = env.step(action_for_frames)
             reward = reward[0]
             # next state processing
-            stacked_next_state,action_for_frames = self._stack_frames(env, action_for_frames)
+            next_state,rot_next_state,action_for_frames = self._stack_frames(env, action_for_frames)
             # Store the experience in the buffer
-            state_tensor = torch.tensor(state[0], dtype=torch.uint8, requires_grad=False,device=self.__nn.get_device())
-            next_state_tensor = torch.tensor(stacked_next_state[0], dtype=torch.uint8, requires_grad=False,device=self.__nn.get_device())
-            self.__store_experience(state_tensor, agentAction, reward, next_state_tensor, done)
+            s = torch.unsqueeze(torch.tensor(rot_state[0], dtype=torch.uint8, device=self.__nn.get_device()), 0)
+            a = torch.tensor([agentAction], dtype=torch.int64, device=self.__nn.get_device())
+            r = torch.tensor([reward], dtype=torch.float32, device=self.__nn.get_device())
+            s2 = torch.unsqueeze(torch.tensor(rot_next_state[0], dtype=torch.uint8, device=self.__nn.get_device()), 0)
+            d = torch.tensor([done], dtype=torch.bool, device=self.__nn.get_device())
+
+            exp = Experience(s, a, r, s2, d)
+            # append with no error
+            self.__experience_replay_buffer.append(exp)
             # We check if the environment is done
             if done:
                 # If we are done we reset the environment and begin another episode
                 env.reset()
-                state,action_for_frames = self._stack_frames(env,action_for_frames)
+                state,rot_state,action_for_frames = self._stack_frames(env,action_for_frames)
             else:
                 # If we are not done we set the current state to the next state
-                state = stacked_next_state
+                state = next_state
+                rot_state = rot_next_state
         print("Buffer filled!")
 
     def _stack_frames(self, env, current_action,getSolo=False):
         # Battlesnake stackinng of frames inspired by https://medium.com/asymptoticlabs/battlesnake-post-mortem-a5917f9a3428
         obs = env.get_observation()
         current_states = []
+        rot_states = []
         if getSolo:
             maxAgents = 1
         else:
@@ -389,24 +393,38 @@ class DQNAgent(Agent):
                 shorter_size_frame,
                 *alive_count_frames
             ], axis=0)
-
+            current_state = all_frames
+            current_states.append(current_state)
             # We want to always face up to reduce state space
             """if direction == "right":
-                all_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
-                current_action = (current_action + 3) % 4
+                rot_frames = np.rot90(all_frames, k=1,axes=(1, 2)).copy()
+                #current_action[snake_idx] = (current_action[snake_idx] + 3) % 4
             elif direction == "left":
-                all_frames = np.rot90(all_frames, k=1,axes=(1, 2)).copy()
-                current_action = (current_action + 1) % 4
+                rot_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
+                #current_action[snake_idx] = (current_action[snake_idx] + 1) % 4
             elif direction == "down":
-                all_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
-                current_action = (current_action + 2) % 4"""
+                rot_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
+                #current_action[snake_idx] = (current_action[snake_idx] + 2) % 4
+            else:"""
+            rot_frames = all_frames.copy()
 
-            current_state = all_frames
+            rot_state = rot_frames
             # We add the current state to the list of current states
-            current_states.append(current_state)
-            """plt.imshow(bin_body_frame)
+            rot_states.append(rot_state)
+            """print("New")
+            plt.imshow(agent_head_frame)
+            plt.show()
+            plt.imshow(bin_body_frame)
+            plt.show()
+            if len(current_action) > 0:
+                print(current_action[snake_idx])
+            else:
+                print("No action")
+            plt.imshow(all_frames[6])
+            plt.show()
+            plt.imshow(all_frames[1])
             plt.show()"""
-        return np.stack(current_states, axis=0), current_action
+        return np.stack(current_states, axis=0),np.stack(rot_states, axis=0), current_action
 
     def choose_action(self, candidates, state, head_positions, random=False):
         """
@@ -477,14 +495,14 @@ class DQNAgent(Agent):
             if valid_candidates.numel() > 0:
                 c_action = valid_candidates[0]
             else:
-                # Step 2: not blocked
+                # not blocked
                 unblocked_mask = ~blocked_mask[candidates]
                 unblocked_candidates = candidates[unblocked_mask]
 
                 if unblocked_candidates.numel() > 0:
                     c_action = unblocked_candidates[0]
                 else:
-                    # Step 3: all blocked, fallback
+                    # all blocked
                     c_action = candidates[0]
 
             self.__last_action = c_action.item()  # store as Python int
@@ -579,7 +597,8 @@ class DQNAgent(Agent):
 
             # Update progress bar description
             self.__update_progress_description(episodes, i, episode_stats['reward_avg'], epsilon)
-
+            # Reset gradients for next episode
+            self.__gradients = []
         # Cleanup
         self.__cleanup(env)
 
@@ -618,7 +637,8 @@ class DQNAgent(Agent):
             # Update progress bar with step information
             ep = len(self.__ep_reward_list)
             self.__update_steps_progress_description(steps, i, ep, episode_stats['reward_avg'], epsilon)
-
+            # Reset gradients for next episode
+            self.__gradients = []
         # Cleanup
         self.__cleanup(env)
 
@@ -635,6 +655,7 @@ class DQNAgent(Agent):
         """Run a single training episode and return stats."""
         # Reset environment
         env.reset()
+
         # Initialize episode variables
         done = False
         next_action = []
@@ -642,10 +663,10 @@ class DQNAgent(Agent):
         reward = 0
         self.__steps = 0
         loss = None
-
+        steps_since_target = 0
         # Stack initial frames
-        state,next_action = self._stack_frames(env, next_action)
-        state_tensor = torch.tensor(state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
+        state,rot_state,next_action = self._stack_frames(env, next_action)
+        state_tensor = torch.tensor(rot_state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
         # Episode loop
         while not done:
 
@@ -662,32 +683,36 @@ class DQNAgent(Agent):
             if self.dqn_agent_enemy2 is not None:
                 next_action.append(self.dqn_agent_enemy2._forward(state[3], 0,self.head_positions[3],state_tensor[3]))
             # Take action in environment
-
             # Get next state and reward. What are terminal and truncated? If episode ended.
             _, reward, done, _ = env.step(next_action)
             reward = reward[0]
-
             # Process next state
-            next_state,next_action = self._stack_frames(env, next_action)
-            next_state_tensor = torch.tensor(next_state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
+            next_state,rot_next_state,next_action = self._stack_frames(env, next_action)
+            next_state_tensor = torch.tensor(rot_next_state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
             # Update counters and rewards
             total_episode_reward += reward
             self.__steps += 1
             self.__total_steps += 1
-
+            steps_since_target +=1
             # Store experience in replay buffer
-            """plt.imshow(state[0][1])
-            plt.show()"""
 
-            self.__store_experience(state_tensor[0], agentAction, reward, next_state_tensor[0], done)
-
+            exp = Experience(
+                state_tensor[0].unsqueeze(0),
+                torch.tensor([agentAction], dtype=torch.int64, device=self.__nn.get_device()),
+                torch.tensor([reward], dtype=torch.float32, device=self.__nn.get_device()),
+                next_state_tensor[0].unsqueeze(0),
+                torch.tensor([done], dtype=torch.bool, device=self.__nn.get_device()),
+            )
+            # store with no error
+            self.__experience_replay_buffer.append(exp)
             # Update neural network
             loss = self._backward(batch_size)
-
             # Update target network periodically
-            if self.__total_steps % target_network_update_freq == 0:
+            if steps_since_target >= target_network_update_freq == 0:
                 self.__update_target_network()
+                steps_since_target = 0
             state = next_state
+            state_tensor = next_state_tensor
         # Return episode statistics
         return {
             'reward': total_episode_reward,
@@ -697,15 +722,7 @@ class DQNAgent(Agent):
                                                  len(self.__ep_reward_list) + 1)[-1]
         }
 
-    def __store_experience(self, state_tensor, action, reward, next_state_tensor, done):
-        """Store an experience tuple in the replay buffer."""
-        reward_tensor = torch.tensor([reward], dtype=torch.float32, requires_grad=False,device=self.__nn.get_device())
-        action_tensor = torch.tensor([action], dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
-        done_tensor = torch.tensor([done], dtype=torch.bool, requires_grad=False,device=self.__nn.get_device())
-        exp = Experience(torch.unsqueeze(state_tensor,0).detach(), action_tensor.detach(),
-                                      reward_tensor.detach(), torch.unsqueeze(next_state_tensor,0).detach(),
-                                      done_tensor.detach())
-        self.__experience_replay_buffer.append(exp)
+
 
     def __record_episode_stats(self, stats, epsilon, n_ep_running_average):
         """Record episode statistics for tracking and visualization."""
@@ -716,13 +733,11 @@ class DQNAgent(Agent):
         self.__eps_list.append(epsilon)
         self.__loss_list.append(stats['loss'])
         self.__mean_grad.append(np.mean(self.__gradients))
-
         # Log metrics to TensorBoard
         writer.add_scalar('training loss', stats['loss'], self.__total_steps)
         writer.add_scalar('Episode reward', stats['reward'], self.__total_steps)
 
-        # Reset gradients for next episode
-        self.__gradients = []
+
 
     def __update_progress_description(self, progress_bar, iteration, reward_avg, epsilon):
         """Update the progress bar description with current training stats."""
@@ -752,7 +767,6 @@ class DQNAgent(Agent):
         """Perform cleanup operations after training."""
         writer.close()
         self.__params_used['total_steps'] = self.__total_steps
-        self.__experience_replay_buffer.clear_memory()
 
 
 
@@ -781,22 +795,6 @@ class DQNAgent(Agent):
             stacked_next_state,action = self._stack_frames(env, action)
         return action, reward_next_state, done_next_state
 
-    def test_policy(self, env1, n_episodes=50):
-        # Simulate episodes
-        print('Checking solution...')
-        Rewards = []
-        try:
-            for i in range(n_episodes):
-                draw_env = DrawBattlesnakeEnvironment(env1)
-                Rewards.append(draw_env.run(self))
-                draw_env.reset()
-            draw_env.close()
-        except(KeyboardInterrupt):
-            print("Keyboard Interrupt!")
-            print("Closing the tests...")
-            draw_env.close()
-            return None
-        return Rewards
 
     def __save_model(self, path):  # We save the model along with its arguments, buffer is saved separately
         torch.save({
