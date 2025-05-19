@@ -165,16 +165,16 @@ if __name__ == "__main__":
     env = BattlesnakeEnv(board_size=BOARD_SIZE, n_snakes=N_SNAKES)
 
     print(f"\nLoading Model 1 from: {model1_path}")
-    snake1 = load_dqn_agent(model1_path, env, old_model=False)
+    snake1 = load_dqn_agent(model1_path, env)
     
     print(f"Loading Model 2 from: {model2_path}")
-    snake2 = load_dqn_agent(model2_path, env, old_model=False)
+    snake2 = load_dqn_agent(model2_path, env)
 
     print(f"\nLoading Model 3 from: {model3_path}")
-    snake3 = load_dqn_agent(model3_path, env, old_model=False)
+    snake3 = load_dqn_agent(model3_path, env)
 
     print(f"Loading Model 4 from: {model4_path}")
-    snake4 = load_dqn_agent(model4_path, env, old_model=False)
+    snake4 = load_dqn_agent(model4_path, env)
     
     renderer = BattlesnakeRenderer(board_size=BOARD_SIZE, n_snakes=N_SNAKES)
     

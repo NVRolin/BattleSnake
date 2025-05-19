@@ -343,9 +343,9 @@ class DQNAgent():
         # store the hyperparameters
         self._store_hyperparameters(hyperparams, env)
 
-        self.dqn_agent_friend = load_dqn_agent(hyperparams['friendly_model'], env, old_model=True)
-        self.dqn_agent_enemy_one = load_dqn_agent(hyperparams['enemy_model'], env, old_model=True)
-        self.dqn_agent_enemy_two = load_dqn_agent(hyperparams['enemy_model'], env, old_model=True)
+        self.dqn_agent_friend = load_dqn_agent(hyperparams['friendly_model'], env)
+        self.dqn_agent_enemy_one = load_dqn_agent(hyperparams['enemy_model'], env)
+        self.dqn_agent_enemy_two = load_dqn_agent(hyperparams['enemy_model'], env)
         
         # epsilon decay
         epsilon_factor = (self._params_used['eps_min'] / self._params_used['eps_max']) ** (1 / int(0.99 * self._params_used['n_episodes']))
@@ -536,7 +536,7 @@ class DQNAgent():
         print("Saved!")
 
 
-def load_dqn_agent(dir_path, env, old_model=False):
+def load_dqn_agent(dir_path, env):
 
     if not os.path.isdir(dir_path):
         raise Exception(f"Invalid path for model: {dir_path}")
@@ -557,10 +557,7 @@ def load_dqn_agent(dir_path, env, old_model=False):
     print("Using device:", device) 
 
     # create the network with the saved parameters
-    if old_model:
-        main_network = DQNetworkCNN(params['output_size'], params['input_size'], params['hidden_size'], device)
-    else:
-        main_network = DQNModel(params['output_size'], params['input_size'], params['hidden_size'], device)
+    main_network = DQNModel(params['output_size'], params['input_size'], params['hidden_size'], device)
     main_network = main_network.to(device)
 
     # init the optimizer and agent
@@ -601,7 +598,7 @@ def load_dqn_agent(dir_path, env, old_model=False):
     return dqn_agent
 
 
-def load_dqn_replit(dir_path, env, old_model=False):
+def load_dqn_replit(dir_path, env):
     if not os.path.isdir(dir_path):
         raise Exception(f"Invalid path for model: {dir_path}")
 
@@ -610,16 +607,13 @@ def load_dqn_replit(dir_path, env, old_model=False):
     with open(params_file, 'r') as f:
         params = json.load(f)
 
-    # Get action space size from environment
+    # get action space size from environment
     n_actions = len(env.ACTIONS)
 
     device = torch.device("cpu")
 
     # create the network with the saved parameters
-    if old_model:
-        main_network = DQNetworkCNN(params['output_size'], params['input_size'], params['hidden_size'], device)
-    else:
-        main_network = DQNModel(params['output_size'], params['input_size'], params['hidden_size'], device)
+    main_network = DQNModel(params['output_size'], params['input_size'], params['hidden_size'], device)
     main_network = main_network.to(device)
 
     # init the optimizer and agent

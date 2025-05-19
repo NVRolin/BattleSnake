@@ -15,7 +15,7 @@ MOVE_MAPPING = ["up", "down", "left", "right"]
 
 
 def load_model():
-    model_path = f"rl/models/candidates/_00"
+    model_path = "rl/models/candidates/_02"
 
     assert os.path.exists(model_path), "No model found in rl/models/candidates"
 
@@ -27,7 +27,7 @@ def load_model():
     return load_dqn_replit(model_path, env)
 
 
-def convert_state_to_frames(game_state, RL_MODEL):
+def convert_state_to_frames(game_state):
     global prev_food_frame, player_ids
     B = game_state['board']['width']
     health_frame = np.zeros((B, B), dtype=np.uint8)  # health at head
@@ -43,10 +43,10 @@ def convert_state_to_frames(game_state, RL_MODEL):
     alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)  # alive count frames with value 255
 
     my_snake = game_state["you"]
-    if my_snake["name"] == "MAS2025-1":
+    if my_snake["name"] == "MAS2025-1 (First)":
         team_snake_name = "MAS2025-1 (Second)"
     else:
-        team_snake_name = "MAS2025-1"
+        team_snake_name = "MAS2025-1 (First)"
     i = 1
     for snake in game_state["board"]["snakes"]:
         head_x, head_y = snake["head"]["x"], snake["head"]["y"]
@@ -75,7 +75,7 @@ def convert_state_to_frames(game_state, RL_MODEL):
             if len(snake["body"]) >= len(my_snake["body"]):
                 longer_opponent_frame[snake["head"]["y"], snake["head"]["x"]] = 255
 
-    # Check for double tail
+    # check for double tail
     eaten_food_positions = np.where((prev_food_frame == 255) & (food_frame == 0))
     if len(eaten_food_positions[0]) > 0:
 
@@ -156,7 +156,7 @@ def move(game_state: typing.Dict) -> typing.Dict:
     global RL_MODEL, MOVE_MAPPING
     while RL_MODEL is None:
         RL_MODEL = load_model()
-    state = convert_state_to_frames(game_state, RL_MODEL)
+    state = convert_state_to_frames(game_state)
 
     state_tensor = torch.tensor(state, dtype=torch.uint8, requires_grad=False)
     my_snake = game_state["you"]
