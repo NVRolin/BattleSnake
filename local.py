@@ -5,20 +5,10 @@ import numpy as np
 import json
 import time
 import pygame
-from matplotlib import pyplot as plt
-
-from rl.agent import DQNAgent
+from rl.agent import *
 from gym.env import BattlesnakeEnv
 from gym.renderer import BattlesnakeRenderer
-def load_trained_model(model_dir):
-    with open(os.path.join(model_dir, "parameters.json"), "r") as f:
-        params = json.load(f)
-    
-    class tempEnv:
-        ACTIONS = [0, 1, 2, 3]
-    env = tempEnv()
 
-    return DQNAgent.load_models_and_parameters_DQN_CNN(model_dir, env)
 
 def convert_state_to_frames(obs, board_size,agent, snake_idx=0):
     global prev_food_frame
@@ -125,8 +115,6 @@ def convert_state_to_frames(obs, board_size,agent, snake_idx=0):
     return state_tensor
 
 
-
-
 def list_available_models():
     models = []
     model_dir = "rl/models/candidates"
@@ -162,35 +150,33 @@ if __name__ == "__main__":
     use_default = input("Use default models? (y/n): ").lower() == 'y'
     
     if use_default and len(models) >= 2:
-        model1_path = models[10]
-        model2_path = models[10]
-        model3_path = models[10]
-        model4_path = models[10]
+        model1_path = models[0]
+        model2_path = models[0]
+        model3_path = models[0]
+        model4_path = models[0]
     else:
         model1_path = choose_model(models, 1)
-        model2_path = choose_model(models, 2)
-        model3_path = choose_model(models, 3)
-        model4_path = choose_model(models, 4)
+        model2_path = choose_model(models, 1)
+        model3_path = choose_model(models, 1)
+        model4_path = choose_model(models, 1)
     
-    print(f"\nLoading Model 1 from: {model1_path}")
-    snake1 = load_trained_model(model1_path)
-    
-    print(f"Loading Model 2 from: {model2_path}")
-    snake2 = load_trained_model(model2_path)
-
-    print(f"\nLoading Model 33 from: {model3_path}")
-    snake3 = load_trained_model(model3_path)
-
-    print(f"Loading Model 4 from: {model4_path}")
-    snake4 = load_trained_model(model4_path)
     BOARD_SIZE = 11
     N_SNAKES = 4
-    
     env = BattlesnakeEnv(board_size=BOARD_SIZE, n_snakes=N_SNAKES)
-    renderer = BattlesnakeRenderer(
-        board_size=BOARD_SIZE,
-        n_snakes=N_SNAKES
-    )
+
+    print(f"\nLoading Model 1 from: {model1_path}")
+    snake1 = load_dqn_agent(model1_path, env, old_model=False)
+    
+    print(f"Loading Model 2 from: {model2_path}")
+    snake2 = load_dqn_agent(model2_path, env, old_model=False)
+
+    print(f"\nLoading Model 3 from: {model3_path}")
+    snake3 = load_dqn_agent(model3_path, env, old_model=False)
+
+    print(f"Loading Model 4 from: {model4_path}")
+    snake4 = load_dqn_agent(model4_path, env, old_model=False)
+    
+    renderer = BattlesnakeRenderer(board_size=BOARD_SIZE, n_snakes=N_SNAKES)
     
     obs = env.reset()
     done = False
@@ -208,29 +194,29 @@ if __name__ == "__main__":
             
             if not done:
                 actions = []
-                state,rot_state,actions = snake1._stack_frames(env, actions)
+                state, rot_state = snake1._stack_frames(env)
                 state_tensor = torch.tensor(rot_state, dtype=torch.uint8, requires_grad=False,
                                             device='cuda')
                 if obs['alive'][0]:
-                    action1 = snake1._forward(state[0], 0,snake1.head_positions[0], state_tensor[0])
+                    action1 = snake1._forward(state[0], 0, snake1._head_positions[0], state_tensor[0])
                     actions.append(action1)
                 else:
                     actions.append(0)
                 
                 if obs['alive'][1]:
-                    action2 = snake2._forward(state[1], 0,snake1.head_positions[1], state_tensor[1])
+                    action2 = snake2._forward(state[1], 0, snake1._head_positions[1], state_tensor[1])
                     actions.append(action2)
                 else:
                     actions.append(0)
 
                 if obs['alive'][2]:
-                    action3 = snake3._forward(state[2], 0,snake1.head_positions[2], state_tensor[2])
+                    action3 = snake3._forward(state[2], 0, snake1._head_positions[2], state_tensor[2])
                     actions.append(action3)
                 else:
                     actions.append(0)
 
                 if obs['alive'][3]:
-                    action4 = snake4._forward(state[3], 0,snake1.head_positions[3], state_tensor[3])
+                    action4 = snake4._forward(state[3], 0, snake1._head_positions[3], state_tensor[3])
                     actions.append(action4)
                 else:
                     actions.append(0)

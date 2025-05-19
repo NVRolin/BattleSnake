@@ -1,62 +1,56 @@
 import numpy as np
 import torch
 import torch.optim as optim
-import model
-import agent
-import gym.env
-device = torch.device('cuda')
+from rl.model import *
+from rl.agent import *
+from gym.env import *
+
 if __name__ == "__main__":
-
-    do_train = True
-
-    path = "./models/experiments/"
+    device = torch.device('cuda')
+    path = "./rl/models/experiments/"
     seed = None
     np.random.seed(seed)
-    if do_train is True:
-        env = gym.env.BattlesnakeEnv(11,4)
-        env_name = env.NAME
-        n_actions = len(env.ACTIONS)
-        desc = "Basic save and load test"
 
-        base_params = {
-            'n_episodes': 1000,
-            'n_steps': 0,
-            'buffer_size': 100,
-            'hidden_size': 512,
-            'device': "cuda",
-            'discount_factor': 0.999,
-            'n_ep_running_average': 10,
-            'alpha': 0.004,
-            'target_network_update_freq': 50,
-            'batch_size': 32,
-            'eps_min': 0.1,
-            'eps_max': 1,
-            'n_frames': 13,
-            'times_tested': 1,
-            'friendly_model': "./models/experiments/_7",
-            'enemy_model': "./models/experiments/_7",
-            'env': env_name,
-            'seed': seed
-        }
+    env = BattlesnakeEnv(11, 4)
+    env_name = env.NAME
+    n_actions = len(env.ACTIONS)
 
-        # Ensure the neural network and the data are on the same device
-        if base_params['device'] == "cuda":  # test i we can run cuda, if not we use cpu
-            print("Is CUDA enabled?", torch.cuda.is_available())
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        main_network = model.DQNetworkCNNNEW(n_actions, base_params['n_frames'], base_params['hidden_size'], device)
-        if main_network.get_device() == "cuda":
-            main_network = main_network.to(
-                main_network.get_device())  # Move main network to Device for cuda to work, (Better if we do this in the mynetwork class TODO)
-        print("Using: " + str(main_network.get_device()))
+    base_params = {
+        'n_episodes': 100,
+        'n_steps': 0,
+        'input_size': 13,
+        'buffer_size': 10000,
+        'hidden_size': 512,
+        'output_size': 4,
+        'device': "cuda",
+        'discount_factor': 0.999,
+        'n_ep_running_average': 10,
+        'alpha': 0.004,
+        'target_network_update_freq': 50,
+        'batch_size': 32,
+        'eps_min': 0.1,
+        'eps_max': 1,
+        'n_frames': 13,
+        'times_tested': 1,
+        'friendly_model': "./rl/models/experiments/_7",
+        'enemy_model': "./rl/models/experiments/_7",
+        'env': env_name,
+        'seed': seed
+    }
 
-        # Init the optimizer
-        # optimizer = optim.Adam(main_network.parameters(), lr=base_params['alpha'])
-        optimizer = optim.RMSprop(main_network.parameters(), lr=base_params['alpha'])
-        # Define DQN agent
-        dqn_agent = agent.DQNAgent(base_params['discount_factor'], base_params['buffer_size'], main_network, optimizer,
-                                   n_actions, base_params['n_frames'])
-        dqn_agent.train_policy(base_params, env)
-        dqn_agent.save_model_and_parameters(save_dir=path, desc=desc)
-        env = gym.env.BattlesnakeEnv(11,4)
+    # ensure the neural network and the data are on the same device
+    if base_params['device'] == "cuda":
+        print("Is CUDA enabled?", torch.cuda.is_available())
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
 
-        dqn_agent.test_policy(env,20)
+    main_network = DQNModel(n_actions, base_params['n_frames'], base_params['hidden_size'], device)
+    main_network = main_network.to(device)
+
+    # init the optimizer
+    optimizer = optim.RMSprop(main_network.parameters(), lr=base_params['alpha'])
+
+    # train the agent
+    dqn_agent = DQNAgent(base_params['discount_factor'], base_params['buffer_size'], main_network, optimizer, n_actions, base_params['n_frames'])
+    dqn_agent.train(base_params, env)
+    dqn_agent.save(path)

@@ -1,314 +1,186 @@
-import time
-
-import numpy
-import torch
-import torch.nn as nn
-from matplotlib import pyplot as plt
-print("Torch version:",torch.__version__)
-from tqdm import trange
-import torch.optim as optim
-import os
+import copy
 import json
+import os
+import random
 from datetime import datetime
 import numpy as np
-import copy
-from rl.replayBuffer import *
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from tqdm import trange
 from rl.model import *
+from rl.buffer import *
 from torch.utils.tensorboard import SummaryWriter
+
 writer = SummaryWriter("runs/DQN")
-class Agent(object):
-    ''' Base agent class, used as a parent class
+print("Torch version:",torch.__version__)
 
-        Args:
-            n_actions (int): number of actions
-
-        Attributes:
-            n_actions (int): where we store the number of actions
-            last_action (int): last action taken by the agent
-    '''
-
-    def __init__(self, n_actions: int):
-        self._n_actions = n_actions
-        self._last_action = None
-
-    def _forward(self, state: np.ndarray):
-        ''' Performs a forward computation '''
-        pass
-
-    def _backward(self):
-        ''' Performs a backward pass on the network '''
-        pass
-
-    def _forward_processing(self, env, state, action):
-        ''' Performs the processing necessary for a forward pass'''
-        pass
-
-
-class RandomAgent(Agent):
-    ''' Agent taking actions uniformly at random, child of the class Agent'''
-
-    def __init__(self, n_actions: int):
-        super(RandomAgent, self).__init__(n_actions)
-
-    def _forward(self, state: np.ndarray) -> int:
-        ''' Compute an action uniformly at random across n_actions possible
-            choices
-
-            Returns:
-                action (int): the random action
-        '''
-        self.__last_action = np.random.randint(self._n_actions)
-        return self.__last_action
-
-    def _forward_processing(self, env, state, action):
-        action = self._forward(state)
-
-        next_state, reward, terminal, truncated, _ = env.step(action)
-        done = terminal or truncated
-        return env, next_state, action, reward, done
-
-
-
-
-class DQNAgent(Agent):
+class DQNAgent():
     def __init__(self, discount_factor, buffer_size, neural_network, optimizer, n_actions, n_frames):
-        super(DQNAgent, self).__init__(n_actions)
-
-        self.__experience_replay_buffer = ExperienceReplayBuffer(capacity=buffer_size)  # init the exp replay buffer
-        self.__n_frames = n_frames
-        self.__steps = 0
-        self.__total_steps = 0
+        super(DQNAgent, self).__init__()
         device = neural_network.get_device()
-        self.__nn = neural_network.to(device)
-        self.__discount_factor = discount_factor
-        # Save the params used by the agent for loading and saving.
-        self.__params_used = {}
-        self.__params_used["buffer_size"] = buffer_size
-        self.__params_used["n_frames"] = n_frames
-        self.__params_used["discount_factor"] = discount_factor
-        self.__params_used["n_actions"] = int(n_actions)
-        self.__params_used["input_size"] = int(neural_network.get_input_size())
-        self.__params_used["hidden_size"] = int(neural_network.get_hidden_size())
-        self.__params_used["output_size"] = int(neural_network.get_output_size())
-        self.__params_used["device"] = str(neural_network.get_device())
-        self.__params_used["lr"] = float(optimizer.param_groups[0]['lr'])
-        self.__loss = nn.SmoothL1Loss()  # We can also use nn.MSELoss()
+        self._experience_replay_buffer = ExperienceReplayBuffer(capacity=buffer_size)
+        self._steps = 0
+        self._total_steps = 0
+        self._nn = neural_network.to(device)
+        self._discount_factor = discount_factor
+        self._params_used = {
+            "buffer_size": buffer_size,
+            "n_frames": n_frames,
+            "discount_factor": discount_factor,
+            "n_actions": int(n_actions),
+            "device": str(device),
+            "lr": float(optimizer.param_groups[0]['lr']),
+            "input_size": neural_network.get_input_size(),
+            "hidden_size": neural_network.get_hidden_size(),
+            "output_size": neural_network.get_output_size()
+        }
+        self._loss = nn.SmoothL1Loss()
         self.dqn_agent_friend = None
-        self.dqn_agent_enemy1 = None
-        self.dqn_agent_enemy2 = None
-        self.head_positions = [(0,0),(0,0),(0,0),(0,0)]
-        self.scaler = torch.amp.GradScaler('cuda')
-        # nn.MSELoss()
-        # calculate the mean square error from the state action values between our network
-        # and the target network and save it to a tensor.
-        # nn.SmoothL1Loss
-        # Creates a criterion that uses a squared term if the absolute element-wise
-        # error falls below beta and an L1 term otherwise.
-        # less sensitive to outliers than torch.nn.MSELoss and in some cases prevents exploding gradients
-        self.__optimizer = optimizer  # init the optimizer
-        # Register hooks to monitor gradients
-        self.__gradients = []
+        self.dqn_agent_enemy_one = None
+        self.dqn_agent_enemy_two = None
+        self._head_positions = [(0,0),(0,0),(0,0),(0,0)]
 
-        self.__target_nn = copy.deepcopy(self.__nn)  # init target network as copy of main network.
-        for p in self.__target_nn.parameters():
+        self._optimizer = optimizer
+        self._gradients = []
+
+        # target network does not require grad
+        self._target_nn = copy.deepcopy(self._nn) 
+        for p in self._target_nn.parameters():
             p.requires_grad = False
-        if self.__nn.get_device() == "cuda":
-            self.__target_nn = self.__target_nn.cuda()  # specify the device of the neural network to cuda.
 
-    # We do not want these actions to be recorded for our next calculation of the gradient.
-    """
-    @torch.no_grad()
-    def __forward_DQN(self, state, epsilon): # forward pass for DQN
-        if np.random.random() < epsilon: # random action
-            self.__last_action = int(np.random.choice(self.__n_actions,1,replace=False))
-        else: # greedy action
-            q_values = self.__nn(torch.tensor(state, requires_grad=False,device=self.nn.get_device()))
-            action = q_values.max(0)[1]
-            self.__last_action = int(action.item())
-        return self.__last_action
-    """
+        if self._nn.get_device() == "cuda":
+            self._target_nn = self._target_nn.cuda() 
+
 
     @torch.no_grad()
-    def _forward(self, state, epsilon,head_positions,state_tensor=None):  # forward pass for DQN+CNN
+    def _forward(self, state, epsilon, head_positions, state_tensor=None):
+        # forward pass based on epsilon
         if np.random.random() < epsilon:  # random action
-            candidates = [0,1,2,3]
-            random.shuffle(candidates)
-            state = state / 255.0
-            candidates_tensor = torch.tensor(candidates, dtype=torch.int64, requires_grad=False,device=self.__nn.get_device())
-            self.choose_action(candidates_tensor, state, head_positions,True)
-
+            actions = [0, 1, 2, 3]
+            random.shuffle(actions)
+            candidates_tensor = torch.tensor(actions, dtype=torch.int64, requires_grad=False, device=self._nn.get_device())
+            self.choose_action(candidates_tensor, state / 255.0, head_positions, True)
         else:  # greedy action
             state_tensor = state_tensor.to(dtype=torch.float32).div_(255.0).unsqueeze(0)
-            candidates_tensor = self.__nn(state_tensor).squeeze(0)
-            # writer.add_graph(self.__nn, state)
-            # writer.close()
-            # print(q_values)
-            # detatch returns the state tensor without the gradient, so it has no attachments with the current gradients.
-
-            state = state / 255.0
-            self.choose_action(candidates_tensor,state,head_positions)
-
-        return self.__last_action
+            candidates_tensor = self._nn(state_tensor).squeeze(0)
+            self.choose_action(candidates_tensor, state / 255.0, head_positions)
+        return self._last_action
     
-    @torch.no_grad()
-    def _forward_queue(self, state):
-        state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-        q_values = self.__nn(state)
-        sorted_actions = torch.argsort(q_values, descending=True)
-        action_list = sorted_actions.cpu().numpy().flatten().tolist()
-        self.__last_action = action_list[0]
 
-        return action_list
-
-    @torch.no_grad()
-    def _forwardBoltz(self, state, tau):
-        # boltzman
-        state = state.detach().to(self.__nn.get_device(), dtype=torch.float32) / 255.0
-        q_values = self.__nn(state).cpu().numpy()[0]
-        max_q_value = np.max(q_values)
-        exp_prob = np.exp((q_values - max_q_value) / tau)
-        prob = exp_prob / np.sum(exp_prob)
-        # choose actions according to the probabilities
-        action = np.random.choice(range(self._n_actions), p=prob)
-        self.__last_action = action
-        return self.__last_action
-
-    def _backward(self, N):  # backward pass - based on current batch of samples update weights of agent's nn
-        if len(self.__experience_replay_buffer) < N:  # not enough samples in buffer
-            print('not enough samples in buffer')
-            return
-        # self.nn.zero_grad()  essentially the same operation as optimizer.zero_grad(), but it's applied directly to the neural network's parameters rather than through the optimizer.
-        self.__optimizer.zero_grad()  # We clear out the gradients of all parameters that the optimizer is tracking.
-        # Not calling it can lead to incorrect gradient computations since we only want to compute the gradients for a single batch.
-
-        state_uint8, action, reward, next_state_uint8, done,indices,weights = self.__experience_replay_buffer.sample_batch(N)  # take N samples from the buffer
+    def _backward(self): # backward pass based on current batch of samples
+        batch_size = self._params_used['batch_size']
+        if len(self._experience_replay_buffer) < batch_size:
+            return # not enough samples in buffer
+        self._optimizer.zero_grad() # clear out the gradients of all parameters that the optimizer is tracking between batches
+        state_uint8, action, reward, next_state_uint8, done,indices,weights = self._experience_replay_buffer.sample_batch(batch_size)  # take N samples from the buffer
         state = state_uint8.to(torch.float32).div_(255.0)
         next_state = next_state_uint8.to(torch.float32).div_(255.0)
-        # We want to get the maximum along the second dimension of the tensor, and [0] accesses the value not the indices of the tensor.
-        """for i in range(len(reward)):
-            if reward[i].item() != 0:
-                ACTION_NAMES = ['up', 'down', 'left', 'right']
-                print(done[i],ACTION_NAMES[action[i].item()], reward[i].item())
-                plt.imshow(np.array(next_state.squeeze(0)[i][6].cpu()))
-                plt.show()
-                plt.imshow(np.array(next_state.squeeze(0)[i][1].cpu()))
-                plt.show()"""
-        """with torch.no_grad():  # Detach qvalues_next_state from the computation graph
-            qvalues_next_state = self.__target_nn(next_state).max(dim=1)[0]"""
-        with torch.amp.autocast('cuda'):
-            q = self.__nn(state)  # [N, A]
-            # We want to get the state action values from the neural network
-            # After passing the state through the neural network, we get a tensor of Q-values for all actions.
-            # we want to select the Q-value corresponding to the action that was actually taken.
-            # This is done using the gather operation: At the second(1) dimension
-            # action.view(N, 1) reshapes the action tensor to have a shape compatible with gathering.
-            # N is the batch size so every action in a batch is print(action.view(N, 1))
-            state_action_values = q.gather(1, action.view(N, 1)).view(-1)  # [N]
-            next_q = self.__target_nn(next_state).max(1)[0]  # [N]
-            # We calculate the TD target using the immediate rewards with the discounted estimate optimal q value for the next state if it terminated.
-            td_target = reward + self.__discount_factor * next_q * (~done)
-            # We compute the loss with optimizer specified with self.loss
-            loss = self.__loss(state_action_values, td_target.detach())
-        self.scaler.scale(loss).backward() # Computes the gradient of the loss tensor.
-        torch.nn.utils.clip_grad_norm_(self.__nn.parameters(),
-                                       1)  # We clip the gradient to avoid the exploding gradient phenomenon.
-        self.scaler.step(self.__optimizer) # we compute the back propagation
-        self.scaler.update()
+
+        q = self._nn(state) # [N, A]
+        # we want to get the state action values from the neural network
+        # after passing the state through the neural network, we get a tensor of q-values for all actions
+        # we want to select the q-value corresponding to the action that was actually taken.
+        state_action_values = q.gather(1, action.view(batch_size, 1)).view(-1) # [N]
+        next_q = self._target_nn(next_state).max(1)[0] # [N]
+        # We calculate the tD target using the immediate rewards with the discounted estimate optimal q-value for the next state if it terminated
+        td_target = reward + self._discount_factor * next_q * (~done)
+
+        loss = self._loss(state_action_values, td_target.detach())
+        loss.backward() # computes the gradient of the loss tensor
+        torch.nn.utils.clip_grad_norm_(self._nn.parameters(), 1) # clip the gradient to avoid the exploding gradients
+        self._optimizer.step() # backprop
 
         # compute new priorities
         with torch.no_grad():
             new_errors = (state_action_values - td_target).abs().cpu().numpy()
-        # update the sampled transitions’ priorities
-        self.__experience_replay_buffer.update_priorities(indices, new_errors)
-        for p in self.__nn.parameters():
-            self.__gradients.append(float(p.grad.norm().detach().cpu()))
+        # update the sampled transitions' priorities
+        self._experience_replay_buffer.update_priorities(indices, new_errors)
+        for p in self._nn.parameters():
+            self._gradients.append(float(p.grad.norm().detach().cpu()))
         return loss.detach().cpu()
 
-    def __update_target_network(self):
-        self.__target_nn.load_state_dict(
-            self.__nn.state_dict())  # Load_state_dict is a integral entry that can save or load models from PyTorch, it contains information about the neural networks state.
-        # self.__target_nn.eval()
 
-    def __fill_buffer(self, env):
-        # function for initial filling of the buffer
-        # Note that in order to start training i.e. finding Q values you need a filled buffer
-        # but you cannot fill a buffer without Q values (which actions to take?)
-        # so instead, you can fill it initially by choosing uniformly random actions
+    def _fill_buffer(self, env):
+        # in order to start training, we need to fill the buffer
+        # the buffer needs to be filled with experiences of the form (state, action, reward, next_state, done)
+        # bootstrap-dilemma: we need experiences to learn q-values, but we need q-values to get experiences
         env.reset()
         action_for_frames = []
-        # Get current state
-        state,rot_state,action_for_frames = self._stack_frames(env,action_for_frames)
+        # get current state
+        state, rot_state = self._stack_frames(env)
         print("Filling buffer...")
-        start_time = time.time()
-        for i in trange(self.__experience_replay_buffer.get_capacity(), desc="Filling Buffer"):
-            # Current state frame processing
-            # We compute the action for the current state.
+
+        for _ in trange(self._experience_replay_buffer.get_capacity(), desc="Buffer", ncols=150, unit='exp'):
+            # current state frame processing
             action_for_frames = []
-            agentAction = self._forward(state[0], 1,self.head_positions[0])
+            agentAction = self._forward(state[0], 1, self._head_positions[0])
             action_for_frames.append(agentAction)
 
+            # get actions for the agents
+            # if the agent is not none use the agent's action, otherwise use the random action
+            if self.dqn_agent_friend is None:
+                action_for_frames.append(self._forward(state[1], 1, self._head_positions[1]))
+            else:
+                action_for_frames.append(self.dqn_agent_friend._forward(state[1], 1, self._head_positions[1]))
 
-            # Get action for friendly agent
-            if self.dqn_agent_friend is not None:
-                action_for_frames.append(self._forward(state[1], 1,self.head_positions[1]))
-            # Get action for enemy agent 1
-            if self.dqn_agent_enemy1 is not None:
-                action_for_frames.append(self._forward(state[2], 1,self.head_positions[2]))
-            # Get action for enemy agent 2
-            if self.dqn_agent_enemy2 is not None:
-                action_for_frames.append(self._forward(state[3], 1,self.head_positions[3]))
-            # We stack the frame with the action for the current state.
-            # We step the environment
+            if self.dqn_agent_enemy_one is None:
+                action_for_frames.append(self._forward(state[2], 1, self._head_positions[2]))
+            else:
+                action_for_frames.append(self.dqn_agent_enemy_one._forward(state[2], 1, self._head_positions[2]))
+
+            if self.dqn_agent_enemy_two is None:
+                action_for_frames.append(self._forward(state[3], 1, self._head_positions[3]))
+            else:
+                action_for_frames.append(self.dqn_agent_enemy_two._forward(state[3], 1, self._head_positions[3]))
+                
             _, reward, done, _ = env.step(action_for_frames)
             reward = reward[0]
-            # next state processing
-            next_state,rot_next_state,action_for_frames = self._stack_frames(env, action_for_frames)
-            # Store the experience in the buffer
-            s = torch.unsqueeze(torch.tensor(rot_state[0], dtype=torch.uint8, device=self.__nn.get_device()), 0)
-            a = torch.tensor([agentAction], dtype=torch.int64, device=self.__nn.get_device())
-            r = torch.tensor([reward], dtype=torch.float32, device=self.__nn.get_device())
-            s2 = torch.unsqueeze(torch.tensor(rot_next_state[0], dtype=torch.uint8, device=self.__nn.get_device()), 0)
-            d = torch.tensor([done], dtype=torch.bool, device=self.__nn.get_device())
 
-            exp = Experience(s, a, r, s2, d)
-            # append with no error
-            self.__experience_replay_buffer.append(exp)
-            # We check if the environment is done
+            # next state processing
+            next_state, rot_next_state = self._stack_frames(env)
+            # store the experience in the buffer
+            s1 = torch.unsqueeze(torch.tensor(rot_state[0], dtype=torch.uint8, device=self._nn.get_device()), 0)
+            a = torch.tensor([agentAction], dtype=torch.int64, device=self._nn.get_device())
+            r = torch.tensor([reward], dtype=torch.float32, device=self._nn.get_device())
+            s2 = torch.unsqueeze(torch.tensor(rot_next_state[0], dtype=torch.uint8, device=self._nn.get_device()), 0)
+            d = torch.tensor([done], dtype=torch.bool, device=self._nn.get_device())
+
+            exp = Experience(s1, a, r, s2, d)
+            self._experience_replay_buffer.append(exp)
+
+            # we check if the environment is done
             if done:
-                # If we are done we reset the environment and begin another episode
+                # reset the environment and begin another episode
                 env.reset()
-                state,rot_state,action_for_frames = self._stack_frames(env,action_for_frames)
+                state, rot_state = self._stack_frames(env)
             else:
-                # If we are not done we set the current state to the next state
+                # set the current state to the next state
                 state = next_state
                 rot_state = rot_next_state
+
         print("Buffer filled!")
 
-    def _stack_frames(self, env, current_action,getSolo=False):
-        # Battlesnake stackinng of frames inspired by https://medium.com/asymptoticlabs/battlesnake-post-mortem-a5917f9a3428
+    def _stack_frames(self, env):
+        # battlesnake stacking of frames inspired by https://medium.com/asymptoticlabs/battlesnake-post-mortem-a5917f9a3428
         obs = env.get_observation()
         current_states = []
         rot_states = []
-        if getSolo:
-            maxAgents = 1
-        else:
-            maxAgents = env.n_snakes
+        B = env.board_size
 
-        for snake_idx in range(maxAgents):
-            B = env.board_size
-            direction = None
-            # Create frame with health at head
-            health_frame = np.zeros((B, B), dtype=np.uint8)
-            bin_body_frame = np.zeros((B, B), dtype=np.uint8)
-            segment_body_frame = np.zeros((B, B), dtype=np.uint8)
-            longer_opponent_frame = np.zeros((B, B), dtype=np.uint8)
-            food_frame = np.zeros((B, B), dtype=np.uint8)
-            board_frame = np.full((B, B), 255, dtype=np.uint8)
-            agent_head_frame = np.zeros((B, B), dtype=np.uint8)
-            double_tail_frame = np.zeros((B, B), dtype=np.uint8)
-            longer_size_frame = np.zeros((B, B), dtype=np.uint8)
-            shorter_size_frame = np.zeros((B, B), dtype=np.uint8)
-            alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)
+        for snake_idx in range(env.n_snakes):
+            health_frame = np.zeros((B, B), dtype=np.uint8) # health at head
+            bin_body_frame = np.zeros((B, B), dtype=np.uint8) # snake body with values 255
+            segment_body_frame = np.zeros((B, B), dtype=np.uint8) # snake body with increasing segment length
+            longer_opponent_frame = np.zeros((B, B), dtype=np.uint8) # longer opponent head with value 255
+            food_frame = np.zeros((B, B), dtype=np.uint8) # food positions with value 255
+            board_frame = np.full((B, B), 255, dtype=np.uint8) # board with value 255
+            agent_head_frame = np.zeros((B, B), dtype=np.uint8) # agent heads with value 255
+            double_tail_frame = np.zeros((B, B), dtype=np.uint8) # double tail with value 255
+            longer_size_frame = np.zeros((B, B), dtype=np.uint8) # longer opponent snake body with value 255
+            shorter_size_frame = np.zeros((B, B), dtype=np.uint8) # shorter opponent snake body with value 255
+            alive_count_frames = np.zeros((3, B, B), dtype=np.uint8) # alive count frames with value 255
+            
             if snake_idx == 0:
                 if obs['alive'][1]:
                     alive_count_frames[0].fill(255)
@@ -338,7 +210,6 @@ class DQNAgent(Agent):
                 if obs['alive'][1]:
                     alive_count_frames[2].fill(255)
 
-
             for i in range(len(obs['snakes'])):
                 if not obs['alive'][i]:
                     continue
@@ -362,24 +233,10 @@ class DQNAgent(Agent):
             for x, y in obs['food']:
                 food_frame[y, x] = 255
             head_x, head_y = obs['snakes'][snake_idx][0]
-            if len(obs['snakes'][snake_idx]) > 1:
-                neck_x, neck_y = obs['snakes'][snake_idx][1]
-            else:
-                neck_x, neck_y = obs['snakes'][snake_idx][0]
 
-            if neck_x < head_x:
-                direction = "right"
-            elif neck_x > head_x:
-                direction = "left"
-            elif neck_y < head_y:
-                direction = "down"
-            elif neck_y > head_y:
-                direction = "up"
-            else:
-                direction = "up"
             agent_head_frame[head_y, head_x] = 255
 
-            self.head_positions[snake_idx] = (head_x, head_y)
+            self._head_positions[snake_idx] = (head_x, head_y)
             all_frames = np.stack([
                 health_frame,
                 bin_body_frame,
@@ -393,50 +250,17 @@ class DQNAgent(Agent):
                 shorter_size_frame,
                 *alive_count_frames
             ], axis=0)
-            current_state = all_frames
-            current_states.append(current_state)
-            # We want to always face up to reduce state space
-            """if direction == "right":
-                rot_frames = np.rot90(all_frames, k=1,axes=(1, 2)).copy()
-                #current_action[snake_idx] = (current_action[snake_idx] + 3) % 4
-            elif direction == "left":
-                rot_frames = np.rot90(all_frames, k=3,axes=(1, 2)).copy()
-                #current_action[snake_idx] = (current_action[snake_idx] + 1) % 4
-            elif direction == "down":
-                rot_frames = np.rot90(all_frames, k=2,axes=(1, 2)).copy()
-                #current_action[snake_idx] = (current_action[snake_idx] + 2) % 4
-            else:"""
-            rot_frames = all_frames.copy()
 
-            rot_state = rot_frames
-            # We add the current state to the list of current states
-            rot_states.append(rot_state)
-            """print("New")
-            plt.imshow(agent_head_frame)
-            plt.show()
-            plt.imshow(bin_body_frame)
-            plt.show()
-            if len(current_action) > 0:
-                print(current_action[snake_idx])
-            else:
-                print("No action")
-            plt.imshow(all_frames[6])
-            plt.show()
-            plt.imshow(all_frames[1])
-            plt.show()"""
-        return np.stack(current_states, axis=0),np.stack(rot_states, axis=0), current_action
+            current_states.append(all_frames)
+            rot_states.append(all_frames.copy())
+            
+        return np.stack(current_states, axis=0), np.stack(rot_states, axis=0)
 
-    def choose_action(self, candidates, state, head_positions, random=False):
-        """
-        candidates: torch.Tensor of action-values (shape [4])
-        state: numpy array of shape [C, H, W]
-        index: agent index for head_positions lookup
-        random: whether to select randomly among unblocked moves
-        """
-        # Get agent head position
-        head_x, head_y = head_positions
-
-        # Define possible moves: up, down, left, right
+    def choose_action(self, candidates, state, head_position, random=False):
+        # choose the action based on the candidates and the state
+        # we avoid immediate death
+        head_x, head_y = head_position
+        # define possible moves: up, down, left, right
         H, W = state.shape[1], state.shape[2]
         move_cells = [
             (max(head_y - 1, 0), head_x),
@@ -444,49 +268,45 @@ class DQNAgent(Agent):
             (head_y, max(head_x - 1, 0)),
             (head_y, min(head_x + 1, W - 1))
         ]
-
-        # Extract relevant state layers (numpy)
+        # extract relevant state layers to avoid immediate death
         body_layer = state[1]
         larger_opponent_layer = state[3]
 
-
-        # Initialize mask lists
+        # init mask lists
         blocked_actions = [head_y == 0, head_y == H - 1, head_x == 0, head_x == W - 1]
         risky_actions = [False] * 4
 
-        # Check collisions
+        # check collisions
         for i, (y, x) in enumerate(move_cells):
             if body_layer[y, x] == 1:
                 blocked_actions[i] = True
-            # Check neighbors for larger opponents
+            # check neighbors for larger opponents
             for ny, nx in [(max(y - 1, 0), x), (min(y + 1, H - 1), x), (y, max(x - 1, 0)), (y, min(x + 1, W - 1))]:
                 if larger_opponent_layer[ny, nx] == 1:
                     risky_actions[i] = True
                     break
 
-        # Convert boolean masks to torch tensors
-        blocked_mask = torch.tensor(blocked_actions, dtype=torch.bool, device=self.__nn.get_device())
-        risky_mask = torch.tensor(risky_actions, dtype=torch.bool, device=self.__nn.get_device())
+        # convert boolean masks to torch tensors
+        blocked_mask = torch.tensor(blocked_actions, dtype=torch.bool, device=self._nn.get_device())
+        risky_mask = torch.tensor(risky_actions, dtype=torch.bool, device=self._nn.get_device())
 
         if not random:
-            # Mask out blocked actions
+            # mask out blocked actions
             valid_vals = candidates.clone()
             valid_vals[blocked_mask] = float('-inf')
 
-            # If all moves blocked, pick best unmasked
+            # if all moves blocked, pick best unmasked
             if torch.all(valid_vals == float('-inf')):
                 action = torch.argmax(candidates).item()
             else:
-                # Further mask risky
+                # further mask risky
                 final_vals = valid_vals.clone()
                 final_vals[risky_mask] = float('-inf')
-                # If all risky, fallback to valid_vals
                 if torch.all(final_vals == float('-inf')):
                     action = torch.argmax(valid_vals).item()
                 else:
                     action = torch.argmax(final_vals).item()
-
-            self.__last_action = action
+            self._last_action = action
         else:
             # select candidates that are not blocked and not risky
             valid_mask = (~blocked_mask[candidates]) & (~risky_mask[candidates])
@@ -505,432 +325,277 @@ class DQNAgent(Agent):
                     # all blocked
                     c_action = candidates[0]
 
-            self.__last_action = c_action.item()  # store as Python int
-    def __running_average(self, x, N):
-        # Function used to compute the running average of the last N elements of a vector x
-        # if x shorter than N, return zeros. Use np.convolve to find averages
+            self._last_action = c_action.item()
+
+
+    def _running_average(self, x):
+        # running average of the last elements of a vector x
+        N = 30
         if len(x) < N:
             y = np.zeros_like(x)
         else:
-            # y = np.convolve(x, np.ones(N)/N,mode='valid') # valid seems to have the same effect as len(x) < N ?
             y = np.copy(x)
             y[N - 1:] = np.convolve(x, np.ones((N,)) / N, mode='valid')
-        return y
+        return y[-1]
 
 
-    def train_policy(self, hyperparams, env):
-        """
-        Train the DQN agent using either episode-based or step-based training.
+    def train(self, hyperparams, env):
+        # store the hyperparameters
+        self._store_hyperparameters(hyperparams, env)
 
-        Args:
-            hyperparams: Dictionary containing hyperparameters
-            env: Training environment
-        """
-        # Store hyperparameters in agent's params
-        self.__store_hyperparameters(hyperparams, env)
+        self.dqn_agent_friend = load_dqn_agent(hyperparams['friendly_model'], env, old_model=True)
+        self.dqn_agent_enemy_one = load_dqn_agent(hyperparams['enemy_model'], env, old_model=True)
+        self.dqn_agent_enemy_two = load_dqn_agent(hyperparams['enemy_model'], env, old_model=True)
+        
+        # epsilon decay
+        epsilon_factor = (self._params_used['eps_min'] / self._params_used['eps_max']) ** (1 / int(0.99 * self._params_used['n_episodes']))
 
-        # Extract hyperparameters
-        n_steps = hyperparams['n_steps']
-        n_episodes = hyperparams['n_episodes']
-        n_ep_running_average = hyperparams['n_ep_running_average']
-        target_network_update_freq = hyperparams['target_network_update_freq']
-        batch_size = hyperparams['batch_size']
-        eps_min = hyperparams['eps_min']
-        eps_max = hyperparams['eps_max']
-        self.dqn_agent_friend = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['friendly_model'], env)
-        self.dqn_agent_enemy1 = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['enemy_model'], env)
-        self.dqn_agent_enemy2 = DQNAgent.load_models_and_parameters_DQN_CNN(hyperparams['enemy_model'], env)
-        # Episode-based training
-        if n_episodes != 0 and n_steps == 0:
-            self.__train_with_episodes(n_episodes, n_ep_running_average, target_network_update_freq,
-                                       batch_size, eps_min, eps_max, env)
+        # initialize training data storage
+        self._ep_reward_list = [] # episodes reward
+        self._ep_reward_list_ra = [] # computed running average
+        self._ep_steps_list = [] # number of steps per episode
+        self._eps_list = [] # epsilon for each episode
+        self._loss_list = [] # loss over the training
+        self._mean_grad = [] # mean gradients
 
-        # Step-based training
-        elif n_episodes == 0 and n_steps != 0:
-            self.__train_with_steps(n_steps, n_ep_running_average, target_network_update_freq,
-                                    batch_size, eps_min, eps_max, env)
+        # fill the replay buffer initially
+        self._fill_buffer(env)
 
-        # Invalid configuration
-        else:
-            return
+        # record start time and init step counter
+        self._params_used['start_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._total_steps = 0
 
-    def __store_hyperparameters(self, hyperparams, env):
-        """Store the hyperparameters used for training in the agent's parameter dictionary."""
-        self.__params_used['n_episodes'] = hyperparams['n_episodes']
-        self.__params_used['n_ep_running_average'] = hyperparams['n_ep_running_average']
-        self.__params_used['target_network_update_freq'] = hyperparams['target_network_update_freq']
-        self.__params_used['batch_size'] = hyperparams['batch_size']
-        self.__params_used['eps_min'] = hyperparams['eps_min']
-        self.__params_used['eps_max'] = hyperparams['eps_max']
-        self.__params_used['times_tested'] = hyperparams['times_tested']
-        self.__params_used['friendly_model'] = hyperparams['friendly_model']
-        self.__params_used['env_name'] = env.NAME
-
-    def __train_with_episodes(self, n_episodes, n_ep_running_average, target_network_update_freq,
-                              batch_size, eps_min, eps_max, env):
-        """Train the agent using episode-based training."""
-        # Setup epsilon decay
-        epsilon_decay = int(0.99 * n_episodes)
-        epsilon_factor = (eps_min / eps_max) ** (1 / epsilon_decay)
-
-        # Initialize training data storage
-        self.__initialize_training_data_lists()
-
-        # Fill the replay buffer initially
-        self.__fill_buffer(env)
-
-        # Record start time and initialize step counter
-        self.__params_used['start_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.__total_steps = 0
-
-        # Training loop
-        episodes = trange(n_episodes, desc='Episode: ', leave=True)
+        # training loop
+        episodes = trange(self._params_used['n_episodes'], desc='Episode: ', leave=True, ncols=150, unit='ep')
         for i in episodes:
-            # Get epsilon for this episode
-            epsilon = max(eps_min, eps_max * (epsilon_factor ** i))
+            # run a single episode
+            epsilon = max(self._params_used['eps_min'], self._params_used['eps_max'] * (epsilon_factor ** i))
+            episode_stats = self._run_episode(env, epsilon, self._params_used['target_network_update_freq'], self._params_used['batch_size'])
 
-            # Run a single episode and collect data
-            episode_stats = self.__run_episode(env, epsilon, target_network_update_freq, batch_size)
-
-            # Record episode results
-            self.__record_episode_stats(episode_stats, epsilon, n_ep_running_average)
+            # record episode results
+            self._record_episode_stats(episode_stats, epsilon)
 
             # Update progress bar description
-            self.__update_progress_description(episodes, i, episode_stats['reward_avg'], epsilon)
-            # Reset gradients for next episode
-            self.__gradients = []
-        # Cleanup
-        self.__cleanup(env)
+            episodes.set_description(
+            "Episode {} - R: {:.1f} - eps: {:.2f} - avg steps: {} - max grad: {:.2E} - min grad: {:.2E}".format(
+                i, episode_stats['reward_avg'], epsilon,
+                self._running_average(self._ep_steps_list),
+                max(self._gradients) if self._gradients else 0,
+                min(self._gradients) if self._gradients else 0,
+                )
+            )
+            self._gradients = []
 
-    def __train_with_steps(self, n_steps, n_ep_running_average, target_network_update_freq,
-                           batch_size, eps_min, eps_max, env):
-        """Train the agent using step-based training."""
-        # Setup epsilon decay
-        epsilon_decay = int(0.99 * n_steps)
-        epsilon_factor = (eps_min / eps_max) ** (1 / epsilon_decay)
+        writer.close()
+        self._params_used['total_steps'] = self._total_steps
 
-        # Initialize training data storage
-        self.__initialize_training_data_lists()
 
-        # Fill the replay buffer initially
-        self.__fill_buffer(env)
+    def _store_hyperparameters(self, hyperparams, env):
+        """Store the hyperparameters used for training in the agent's parameter dictionary."""
+        self._params_used['n_episodes'] = hyperparams['n_episodes']
+        self._params_used['n_ep_running_average'] = hyperparams['n_ep_running_average']
+        self._params_used['target_network_update_freq'] = hyperparams['target_network_update_freq']
+        self._params_used['batch_size'] = hyperparams['batch_size']
+        self._params_used['eps_min'] = hyperparams['eps_min']
+        self._params_used['eps_max'] = hyperparams['eps_max']
+        self._params_used['times_tested'] = hyperparams['times_tested']
+        self._params_used['friendly_model'] = hyperparams['friendly_model']
+        self._params_used['env_name'] = env.NAME
 
-        # Record start time and initialize step counter
-        self.__params_used['start_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.__total_steps = 0
 
-        # Training loop
-        steps = trange(n_steps, desc='Step: ', leave=True)
-        i = 0
-
-        while i < len(steps):
-            # Get epsilon based on current step
-            epsilon = max(eps_min, eps_max * (epsilon_factor ** i))
-
-            # Run a single episode
-            episode_stats = self.__run_episode(env, epsilon, target_network_update_freq, batch_size)
-            i = self.__total_steps  # Update step counter
-
-            # Record episode results
-            self.__record_episode_stats(episode_stats, epsilon, n_ep_running_average)
-
-            # Update progress bar with step information
-            ep = len(self.__ep_reward_list)
-            self.__update_steps_progress_description(steps, i, ep, episode_stats['reward_avg'], epsilon)
-            # Reset gradients for next episode
-            self.__gradients = []
-        # Cleanup
-        self.__cleanup(env)
-
-    def __initialize_training_data_lists(self):
-        """Initialize lists to track training data."""
-        self.__ep_reward_list = []  # Used to save episodes reward
-        self.__ep_reward_list_RA = []  # Used to save the computed running average
-        self.__ep_steps_list = []  # Used to save number of steps per episode
-        self.__eps_list = []  # Used to save the epsilon for each episode
-        self.__loss_list = []  # Used to keep track of the loss over the training
-        self.__mean_grad = []  # Used to track mean gradients
-
-    def __run_episode(self, env, epsilon, target_network_update_freq, batch_size):
-        """Run a single training episode and return stats."""
-        # Reset environment
+    def _run_episode(self, env, epsilon, target_network_update_freq, batch_size):
         env.reset()
 
-        # Initialize episode variables
+        # init variables
         done = False
         next_action = []
         total_episode_reward = 0
         reward = 0
-        self.__steps = 0
+        self._steps = 0
         loss = None
         steps_since_target = 0
-        # Stack initial frames
-        state,rot_state,next_action = self._stack_frames(env, next_action)
-        state_tensor = torch.tensor(rot_state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
-        # Episode loop
+
+        # stack initial frames
+        state, rot_state = self._stack_frames(env)
+        state_tensor = torch.tensor(rot_state, dtype=torch.uint8, requires_grad=False, device=self._nn.get_device())
+
+        # episode loop
         while not done:
-
             next_action = []
-            # Choose action using epsilon-greedy policy
-            agentAction = self._forward(state[0], epsilon,self.head_positions[0],state_tensor[0])
+            # choose action using epsilon-greedy policy
+            agentAction = self._forward(state[0], epsilon, self._head_positions[0],state_tensor[0])
             next_action.append(agentAction)
-            if self.dqn_agent_friend is not None:
-                next_action.append(self.dqn_agent_friend._forward(state[1], 0,self.head_positions[1],state_tensor[1]))
-            # Get action for enemy agent 1
-            if self.dqn_agent_enemy1 is not None:
-                next_action.append(self.dqn_agent_enemy1._forward(state[2], 0,self.head_positions[2],state_tensor[2]))
-            # Get action for enemy agent 2
-            if self.dqn_agent_enemy2 is not None:
-                next_action.append(self.dqn_agent_enemy2._forward(state[3], 0,self.head_positions[3],state_tensor[3]))
-            # Take action in environment
-            # Get next state and reward. What are terminal and truncated? If episode ended.
-            _, reward, done, _ = env.step(next_action)
-            reward = reward[0]
-            # Process next state
-            next_state,rot_next_state,next_action = self._stack_frames(env, next_action)
-            next_state_tensor = torch.tensor(rot_next_state, dtype=torch.uint8, requires_grad=False, device=self.__nn.get_device())
-            # Update counters and rewards
-            total_episode_reward += reward
-            self.__steps += 1
-            self.__total_steps += 1
-            steps_since_target +=1
-            # Store experience in replay buffer
 
+            # get actions for the agents
+            if self.dqn_agent_friend is None:
+                next_action.append(self._forward(state[1], 0, self._head_positions[1],state_tensor[1]))
+            else:
+                next_action.append(self.dqn_agent_friend._forward(state[1], 0, self._head_positions[1],state_tensor[1]))
+
+            if self.dqn_agent_enemy_one is None:
+                next_action.append(self._forward(state[2], 0, self._head_positions[2],state_tensor[2]))
+            else:
+                next_action.append(self.dqn_agent_enemy_one._forward(state[2], 0, self._head_positions[2],state_tensor[2]))
+
+            if self.dqn_agent_enemy_two is None:
+                next_action.append(self._forward(state[3], 0, self._head_positions[3],state_tensor[3]))
+            else:
+                next_action.append(self.dqn_agent_enemy_two._forward(state[3], 0, self._head_positions[3],state_tensor[3]))
+            
+            # process next state
+            _, rewards, done, _ = env.step(next_action)
+            reward = rewards[0]  # Get the reward for our agent
+            next_state, rot_next_state = self._stack_frames(env)
+            next_state_tensor = torch.tensor(rot_next_state, dtype=torch.uint8, requires_grad=False, device=self._nn.get_device())
+
+            # update counters and rewards
+            total_episode_reward += reward
+            self._steps += 1
+            self._total_steps += 1
+            steps_since_target +=1
+
+            # store experience in replay buffer
             exp = Experience(
                 state_tensor[0].unsqueeze(0),
-                torch.tensor([agentAction], dtype=torch.int64, device=self.__nn.get_device()),
-                torch.tensor([reward], dtype=torch.float32, device=self.__nn.get_device()),
+                torch.tensor([agentAction], dtype=torch.int64, device=self._nn.get_device()),
+                torch.tensor([reward], dtype=torch.float32, device=self._nn.get_device()),
                 next_state_tensor[0].unsqueeze(0),
-                torch.tensor([done], dtype=torch.bool, device=self.__nn.get_device()),
+                torch.tensor([done], dtype=torch.bool, device=self._nn.get_device()),
             )
+
             # store with no error
-            self.__experience_replay_buffer.append(exp)
-            # Update neural network
-            loss = self._backward(batch_size)
-            # Update target network periodically
+            self._experience_replay_buffer.append(exp)
+            loss = self._backward()
+
+            # update target network periodically
             if steps_since_target >= target_network_update_freq == 0:
-                self.__update_target_network()
+                self._target_nn.load_state_dict(
+                    self._nn.state_dict()) 
                 steps_since_target = 0
             state = next_state
             state_tensor = next_state_tensor
-        # Return episode statistics
+
         return {
             'reward': total_episode_reward,
-            'steps': self.__steps,
+            'steps': self._steps,
             'loss': float(loss) if loss is not None else 0,
-            'reward_avg': self.__running_average(self.__ep_reward_list + [total_episode_reward],
-                                                 len(self.__ep_reward_list) + 1)[-1]
+            'reward_avg': self._running_average(self._ep_reward_list + [total_episode_reward])
         }
 
 
-
-    def __record_episode_stats(self, stats, epsilon, n_ep_running_average):
-        """Record episode statistics for tracking and visualization."""
-        self.__ep_reward_list.append(stats['reward'])
-        current_ra = self.__running_average(self.__ep_reward_list, n_ep_running_average)[-1]
-        self.__ep_reward_list_RA.append(current_ra)
-        self.__ep_steps_list.append(stats['steps'])
-        self.__eps_list.append(epsilon)
-        self.__loss_list.append(stats['loss'])
-        self.__mean_grad.append(np.mean(self.__gradients))
-        # Log metrics to TensorBoard
-        writer.add_scalar('training loss', stats['loss'], self.__total_steps)
-        writer.add_scalar('Episode reward', stats['reward'], self.__total_steps)
-
+    def _record_episode_stats(self, stats, epsilon):
+        # record episode results
+        self._ep_reward_list.append(stats['reward'])
+        self._ep_reward_list_ra.append(self._running_average(self._ep_reward_list))
+        self._ep_steps_list.append(stats['steps'])
+        self._eps_list.append(epsilon)
+        self._loss_list.append(stats['loss'])
+        self._mean_grad.append(np.mean(self._gradients))
+        
+        # log metrics to tensorboard
+        writer.add_scalar('Training loss', stats['loss'], self._total_steps)
+        writer.add_scalar('Episode reward', stats['reward'], self._total_steps)
 
 
-    def __update_progress_description(self, progress_bar, iteration, reward_avg, epsilon):
-        """Update the progress bar description with current training stats."""
-        progress_bar.set_description(
-            "Episode {} - Reward/epsilon: {:.1f}/{:.2f} - Avg. # of steps: {}| Max grad: {:.5E} | Min grad: {:.5E} | Mean grad: {:.5E}".format(
-                iteration, reward_avg, epsilon,
-                self.__running_average(self.__ep_steps_list, 10)[-1],
-                max(self.__gradients) if self.__gradients else 0,
-                min(self.__gradients) if self.__gradients else 0,
-                np.mean(self.__gradients) if self.__gradients else 0
-            )
-        )
-
-    def __update_steps_progress_description(self, progress_bar, step, episode, reward_avg, epsilon):
-        """Update the steps progress bar description with current training stats."""
-        progress_bar.set_description(
-            "Step {:.3E} Episode {} - Reward/epsilon: {:.1f}/{:.2f} - Avg. # of steps: {}| Max grad: {:.5E} | Min grad: {:.5E} | Mean grad: {:.5E}".format(
-                step, episode, reward_avg, epsilon,
-                self.__running_average(self.__ep_steps_list, 10)[-1],
-                max(self.__gradients) if self.__gradients else 0,
-                min(self.__gradients) if self.__gradients else 0,
-                np.mean(self.__gradients) if self.__gradients else 0
-            )
-        )
-
-    def __cleanup(self, env):
-        """Perform cleanup operations after training."""
-        writer.close()
-        self.__params_used['total_steps'] = self.__total_steps
-
-
-
-    def _forward_processing(self, env,action):
-        stacked_state,action = self.__stack_frames(env, action)
-        action = []
-        action.append(self._forward(stacked_state[0], 0,0))
-        # Get action for friendly agent
-        if self.dqn_agent_friend is not None:
-            action.append(self.dqn_agent_friend._forward(stacked_state[1], 0,1))
-        # Get action for enemy agent 1
-        if self.dqn_agent_enemy1 is not None:
-            action.append(self.dqn_agent_enemy1._forward(stacked_state[2], 0,2))
-        # Get action for enemy agent 2
-        if self.dqn_agent_enemy2 is not None:
-            action.append(self.dqn_agent_enemy2._forward(stacked_state[3], 0,3))
-        """print(np.array(stacked_state[0].squeeze(0)[6].cpu()))
-        print(np.array(stacked_state[1].squeeze(0)[6].cpu()))
-        print(np.array(stacked_state[2].squeeze(0)[6].cpu()))
-        print(np.array(stacked_state[3].squeeze(0)[6].cpu()))"""
-        # Get next state and reward. What are terminal and truncated? If episode ended.
-        next_state, reward_next_state, terminal_next_state, info_next_state = env.step(action)
-        reward_next_state = reward_next_state[0]
-        done_next_state = terminal_next_state
-        if not done_next_state:
-            stacked_next_state,action = self._stack_frames(env, action)
-        return action, reward_next_state, done_next_state
-
-
-    def __save_model(self, path):  # We save the model along with its arguments, buffer is saved separately
-        torch.save({
-            'neural_network_state_dict': self.__nn.state_dict(),
-            'optimizer_state_dict': self.__optimizer.state_dict(),
-        }, path)
-
-    def __load_model(self, path):  # We load the model from the path we saved to.
-        checkpoint = torch.load(path, map_location=torch.device(self.__params_used['device']))
-        self.__nn.load_state_dict(checkpoint['neural_network_state_dict'])
-        self.__optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-    def get_ep_reward_list(self):
-        return self.__ep_reward_list
-
-    def get_ep_reward_list_RA(self):
-        return self.__ep_reward_list_RA
-
-    def get_ep_steps_list(self):
-        return self.__ep_steps_list
-
-    def get_eps_list(self):
-        return self.__eps_list
-
-    def get_loss_list(self):
-        return self.__loss_list
-
-    def __make_numerated_dir_path(self, save_dir):
-        # Create the save directory
+    def save(self, save_dir):
         dir_name = os.path.basename(save_dir)
-        # Extract the directory path
         parent_dir = os.path.dirname(save_dir)
 
-        # Create a numerated dict structure
         i = 0
         while True:
-            new_dir_name = f"{dir_name}_{i}"
+            new_dir_name = f"{dir_name}_{i:02d}"
             new_save_dir = os.path.join(parent_dir, new_dir_name)
             if not os.path.exists(new_save_dir):
                 break
             i += 1
         save_dir = new_save_dir
-        return save_dir
-
-    def save_model_and_parameters(self, save_dir, desc):
-        # Make numerated dir for the test
-
-        # Make a new, numerically suffixed folder
-        save_dir = self.__make_numerated_dir_path(save_dir)
-
         os.makedirs(save_dir)
 
-        # Stamp params
-        self.__params_used['end_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Save date
-        self.__params_used['desc'] = desc
+        self._params_used['end_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Save date
 
-        # Save hyperparameters & metadata
+        # save the parameters and the model
         with open(os.path.join(save_dir, 'parameters.json'), 'w') as f:
-            json.dump(self.__params_used, f, indent=4)
+            json.dump(self._params_used, f, indent=4)
 
-        # Save trained model
-        model_path = os.path.join(save_dir, 'model.pt')
-        self.__save_model(model_path)
+        torch.save({
+            'neural_network_state_dict': self._nn.state_dict(),
+            'optimizer_state_dict': self._optimizer.state_dict(),
+        }, os.path.join(save_dir, 'model.pt'))
 
-        # Save additional training data if there is any
-        try:
-            with open(os.path.join(save_dir, 'training_data.json'), 'w') as f:
-                json.dump({
-                    'ep_reward_list': self.__ep_reward_list,
-                    'ep_reward_list_RA': self.__ep_reward_list_RA,
-                    'ep_steps_list': self.__ep_steps_list,
-                    'loss_list': self.__loss_list,
-                    'eps_list': self.__eps_list,
-                    'mean_grad': self.__mean_grad
-                }, f, indent=4)
-        except:
-            print("Could not find train data.")
+        # save additional training data
+        with open(os.path.join(save_dir, 'training_data.json'), 'w') as f:
+            json.dump({
+            'ep_reward_list': self._ep_reward_list,
+            'ep_reward_list_ra': self._ep_reward_list_ra,
+            'ep_steps_list': self._ep_steps_list,
+            'loss_list': self._loss_list,
+            'eps_list': self._eps_list,
+            'mean_grad': self._mean_grad
+            }, f, indent=4)
+
         print("Saved!")
 
-    @classmethod
-    def load_models_and_parameters_DQN_CNN(cls, dir_path, env):
-        if not os.path.isdir(dir_path):
-            raise FileNotFoundError(f"No such directory: {dir_path}")
 
-        # Load parameters from the 'parameters.json' file
-        params_path = os.path.join(dir_path, "parameters.json")
-        with open(params_path, "r") as f:
-            params = json.load(f)
+def load_dqn_agent(dir_path, env, old_model=False):
 
-        # Reconstruct device
-        dev_str = params.get("device", "cpu")
-        if "cuda" in dev_str and torch.cuda.is_available():
-            device = torch.device(dev_str)
-        else:
-            device = torch.device("cpu")
+    if not os.path.isdir(dir_path):
+        raise Exception(f"Invalid path for model: {dir_path}")
 
-        # Build the main network and send to device
-        n_actions = len(env.ACTIONS)
-        main_net = DQNetworkCNN(
-            output_size=params["output_size"],
-            input_size=params["input_size"],
-            hidden_size=params["hidden_size"],
-            device=device,
-        ).to(device)
-        # Create optimizer and agent
-        optimizer = optim.RMSprop(main_net.parameters(), lr=params["lr"])
-        agent = cls(
-            discount_factor=params["discount_factor"],
-            buffer_size=params["buffer_size"],
-            neural_network=main_net,
-            optimizer=optimizer,
-            n_actions=n_actions,
-            n_frames=params["n_frames"],
-        )
-        agent.__params_used = params
+    # load parameters
+    params_file = os.path.join(dir_path, 'parameters.json')
+    with open(params_file, 'r') as f:
+        params = json.load(f)
+    
+    # Get action space size from environment
+    n_actions = len(env.ACTIONS)
+    
+    if params['device'] == "cuda":
+        print("Is CUDA enabled?", torch.cuda.is_available())
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device("cpu")
+    print("Using device:", device) 
 
-        # Load model + optimizer state
-        checkpoint = torch.load(os.path.join(dir_path, "model.pt"), map_location=device)
-        main_net.load_state_dict(checkpoint["neural_network_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    # create the network with the saved parameters
+    if old_model:
+        main_network = DQNetworkCNN(params['output_size'], params['input_size'], params['hidden_size'], device)
+    else:
+        main_network = DQNModel(params['output_size'], params['input_size'], params['hidden_size'], device)
+    main_network = main_network.to(device)
 
-        # Sync target network
-        agent.__target_nn.load_state_dict(main_net.state_dict())
+    # init the optimizer and agent
+    optimizer = optim.RMSprop(main_network.parameters(), lr=params['lr'])
+    dqn_agent = DQNAgent(params['discount_factor'], params['buffer_size'], main_network, optimizer, n_actions, params['n_frames'])
 
-        # load training_data.json for plotting/resume stats
-        td_path = os.path.join(dir_path, "training_data.json")
-        if os.path.isfile(td_path):
-            with open(td_path, "r") as f:
-                td = json.load(f)
-            agent._DQNAgent__ep_reward_list = td.get("ep_reward_list", [])
-            agent._DQNAgent__ep_reward_list_RA = td.get("ep_reward_list_RA", [])
-            agent._DQNAgent__ep_steps_list = td.get("ep_steps_list", [])
-            agent._DQNAgent__loss_list = td.get("loss_list", [])
-            agent._DQNAgent__eps_list = td.get("eps_list", [])
-            agent._DQNAgent__mean_grad = td.get("mean_grad", [])
+    # load the saved model weights
+    checkpoint = torch.load(os.path.join(dir_path, 'model.pt'), map_location=device)
+    dqn_agent._nn.load_state_dict(checkpoint['neural_network_state_dict'])
+    dqn_agent._optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Ensure model is on the correct device
+    dqn_agent._nn = dqn_agent._nn.to(device)
+    dqn_agent._target_nn = dqn_agent._target_nn.to(device)
 
-        print(f"[DQNAgent] Loaded checkpoint from {dir_path} on {device}.")
-        return agent
+    # set the parameters
+    dqn_agent._params_used = params
 
+    # sync the target network
+    dqn_agent._target_nn.load_state_dict(dqn_agent._nn.state_dict())
+
+    # load the training data
+    try:
+        with open(os.path.join(dir_path, 'training_data.json'), 'r') as f:
+                training_data = json.load(f)
+
+        dqn_agent._ep_reward_list = training_data['ep_reward_list']
+        dqn_agent._ep_reward_list_ra = training_data['ep_reward_list_ra']
+        dqn_agent._ep_steps_list = training_data['ep_steps_list']
+        dqn_agent._loss_list = training_data['loss_list']
+        dqn_agent._eps_list = training_data['eps_list']
+        dqn_agent._mean_grad = training_data['mean_grad']
+
+    except Exception as e:
+        print(f"Error loading training data: {e}")
+
+    print("Model loaded successfully!")
+    return dqn_agent
