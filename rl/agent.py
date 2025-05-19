@@ -225,7 +225,7 @@ class DQNAgent():
                         longer_size_frame[y, x] = len(snake)-len(obs['snakes'][snake_idx])
                     elif len(snake) < len(obs['snakes'][snake_idx]):
                         shorter_size_frame[y, x] = len(obs['snakes'][snake_idx])-len(snake)
-                if len(snake) > len(obs['snakes'][snake_idx]):
+                if len(snake) >= len(obs['snakes'][snake_idx]):
                     longer_opponent_frame[head_y, head_x] = 255
                 if obs['food_eaten'][i]:
                     double_tail_x, double_tail_y = snake[-1]

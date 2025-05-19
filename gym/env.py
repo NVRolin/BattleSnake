@@ -184,7 +184,7 @@ class BattlesnakeEnv:
             if 0 <= x < self.board_size and 0 <= y < self.board_size and self.board[y, x] == 1:
                 self.food_eaten[i] = True
                 self.snake_health[i] = 100
-                rewards[i] = 0.01
+                rewards[i] = 1
                 self.food.remove((x, y))
                 self.board[y, x] = 0
                 self.target_lengths[i] += 1

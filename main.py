@@ -14,7 +14,7 @@ RL_MODEL = None
 MOVE_MAPPING = ["up", "down", "left", "right"]
 
 def load_model():
-    model_path = f"rl/models/candidates/_11"
+    model_path = f"rl/models/candidates/_00"
 
     assert os.path.exists(model_path), "No model found in rl/models/candidates"
     
@@ -22,55 +22,56 @@ def load_model():
         ACTIONS = [0, 1, 2, 3]
     env = tempEnv()
 
-    return DQNAgent.load_models_and_parameters_DQN_CNN(model_path, env)
+    return DQNAgent.load_dqn_agent(model_path, env)
 
 
-def convert_state_to_frames(game_state):
+def convert_state_to_frames(game_state,RL_MODEL):
     global prev_food_frame, player_ids
-
     B = game_state['board']['width']
-    health_frame = np.zeros((B, B), dtype=np.uint8)
-    bin_body_frame = np.zeros((B, B), dtype=np.uint8)
-    segment_body_frame = np.zeros((B, B), dtype=np.uint8)
-    longer_opponent_frame = np.zeros((B, B), dtype=np.uint8)
-    food_frame = np.zeros((B, B), dtype=np.uint8)
-    board_frame = np.full((B, B), 255, dtype=np.uint8)
-    agent_head_frame = np.zeros((B, B), dtype=np.uint8)
-    double_tail_frame = np.zeros((B, B), dtype=np.uint8) #
-    longer_size_frame = np.zeros((B, B), dtype=np.uint8) 
-    shorter_size_frame = np.zeros((B, B), dtype=np.uint8)
-    alive_count_frames = np.zeros((3, B, B), dtype=np.uint8) # 
-    
-    my_snake = game_state["you"]
+    health_frame = np.zeros((B, B), dtype=np.uint8)  # health at head
+    bin_body_frame = np.zeros((B, B), dtype=np.uint8)  # snake body with values 255
+    segment_body_frame = np.zeros((B, B), dtype=np.uint8)  # snake body with increasing segment length
+    longer_opponent_frame = np.zeros((B, B), dtype=np.uint8)  # longer opponent head with value 255
+    food_frame = np.zeros((B, B), dtype=np.uint8)  # food positions with value 255
+    board_frame = np.full((B, B), 255, dtype=np.uint8)  # board with value 255
+    agent_head_frame = np.zeros((B, B), dtype=np.uint8)  # agent heads with value 255
+    double_tail_frame = np.zeros((B, B), dtype=np.uint8)  # double tail with value 255
+    longer_size_frame = np.zeros((B, B), dtype=np.uint8)  # longer opponent snake body with value 255
+    shorter_size_frame = np.zeros((B, B), dtype=np.uint8)  # shorter opponent snake body with value 255
+    alive_count_frames = np.zeros((3, B, B), dtype=np.uint8)  # alive count frames with value 255
 
+
+
+
+    my_snake = game_state["you"]
+    i = 1
     for snake in game_state["board"]["snakes"]:
         head_x, head_y = snake["head"]["x"], snake["head"]["y"]
         health = snake["health"]
         health_frame[head_y, head_x] = health * 255 // 100
         if snake["id"] == my_snake["id"]:
             agent_head_frame[head_y, head_x] = 255
+            RL_MODEL._head_positions[0] = (head_x, head_y)
+        elif snake["name"] == my_snake["name"]:
+            alive_count_frames[0].fill(255)
+            RL_MODEL._head_positions[1] = (head_x, head_y)
+        else:
+            alive_count_frames[i].fill(255)
+            RL_MODEL._head_positions[i] = (head_x, head_y)
+            i += 1
 
-    for snake in game_state["board"]["snakes"]:
-
-        is_my_snake = snake["id"] == my_snake["id"]
-        
         for j, segment in enumerate(snake["body"]):
             x, y = segment["x"], segment["y"]
             bin_body_frame[y, x] = 255
             segment_body_frame[y, x] = j
-        
-        if not is_my_snake:
-            if len(snake["body"]) > len(my_snake["body"]):
-                longer_opponent_frame[snake["head"]["y"], snake["head"]["x"]] = 255
-                for segment in snake["body"]:
-                    x, y = segment["x"], segment["y"]
-                    longer_size_frame[y, x] = len(snake["body"]) - len(my_snake["body"])
-            elif len(snake["body"]) < len(my_snake["body"]):
-                for segment in snake["body"]:
-                    x, y = segment["x"], segment["y"]
-                    shorter_size_frame[y, x] = len(my_snake["body"]) - len(snake["body"])
-    
+            if len(snake["body"]) >= len(my_snake["body"]):
+                longer_size_frame[y, x] = len(snake["body"]) - len(my_snake["body"])
+            else:
+                shorter_size_frame[y, x] = len(my_snake["body"]) - len(snake["body"])
+        if len(snake["body"]) >= len(my_snake["body"]):
+            longer_opponent_frame[snake["head"]["y"], snake["head"]["x"]] = 255
 
+    # Check for double tail
     eaten_food_positions = np.where((prev_food_frame == 255) & (food_frame == 0))
     if len(eaten_food_positions[0]) > 0:
 
@@ -91,14 +92,6 @@ def convert_state_to_frames(game_state):
 
     prev_food_frame = food_frame.copy()
 
-    for i in range(len(alive_count_frames)):
-        alive_count_frames[i].fill(0)
-    
-    current_snake_ids = [snake["id"] for snake in game_state["board"]["snakes"]]
-
-    for i, player_id in enumerate(player_ids):
-        if player_id in current_snake_ids:
-            alive_count_frames[i].fill(255)
 
     all_frames = np.stack([
         health_frame,
@@ -113,11 +106,9 @@ def convert_state_to_frames(game_state):
         shorter_size_frame,
         *alive_count_frames
     ], axis=0)
+
     
-    state_tensor = torch.from_numpy(all_frames)
-    state_tensor = state_tensor.unsqueeze(0)
-    
-    return state_tensor
+    return all_frames
 
 # info is called when you create your Battlesnake on play.battlesnake.com
 def info() -> typing.Dict:
@@ -163,71 +154,13 @@ def move(game_state: typing.Dict) -> typing.Dict:
     if RL_MODEL is None:
         RL_MODEL = load_model()
     
-    state_tensor = convert_state_to_frames(game_state)
-    actions = RL_MODEL._forward_queue(state_tensor)
-    
-    move_danger = {"up": 0, "down": 0, "left": 0, "right": 0}
-    my_head = game_state["you"]["head"]
-    my_size = len(game_state["you"]["body"])
-    
-    # Define potential moves
-    potential_moves = {
-        "up": {"x": my_head["x"], "y": my_head["y"] + 1},
-        "down": {"x": my_head["x"], "y": my_head["y"] - 1},
-        "left": {"x": my_head["x"] - 1, "y": my_head["y"]},
-        "right": {"x": my_head["x"] + 1, "y": my_head["y"]}
-    }
-    
-    for dir, pos in potential_moves.items():
-        x, y = pos["x"], pos["y"]
-        # Out of bounds check
-        if x < 0 or x >= game_state["board"]["width"] or y < 0 or y >= game_state["board"]["height"]:
-            move_danger[dir] = 1
-            continue
-            
-        # Neck check
-        if len(game_state["you"]["body"]) > 1 and x == game_state["you"]["body"][1]["x"] and y == game_state["you"]["body"][1]["y"]:
-            move_danger[dir] = 1
-            continue
-        
-        # Check potential collisions
-        for snake in game_state["board"]["snakes"]:
+    state = convert_state_to_frames(game_state,RL_MODEL)
+    state_tensor = torch.tensor(state, dtype=torch.uint8, requires_grad=False)
+    action = RL_MODEL._forward(state_tensor,0,RL_MODEL._head_positions[0])
 
-            # Body collisions
-            for segment in snake["body"][1:]:
-                if x == segment["x"] and y == segment["y"]:
-                    move_danger[dir] = 1
-                    
-            # Enemy head immediate collisions
-            if snake["id"] != game_state["you"]["id"] and x == snake["head"]["x"] and y == snake["head"]["y"]:
-                move_danger[dir] = 1
-                
-            # Potential head-on collisions with larger, equal snakes
-            if snake["id"] != game_state["you"]["id"] and len(snake["body"]) >= my_size:
-                enemy_head = snake["head"]
 
-                for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
-                    enemy_x, enemy_y = enemy_head["x"] + dx, enemy_head["y"] + dy
-
-                    if x == enemy_x and y == enemy_y and move_danger[dir] < 0.5:
-                        move_danger[dir] = 0.5
-    
-    next_move = None
-    best_danger = 1.1
-    
-    for action in actions:
-        move_option = MOVE_MAPPING[action]
-        if move_danger[move_option] < best_danger:
-            next_move = move_option
-            best_danger = move_danger[move_option]
-            if best_danger == 0:
-                break
-    
-    if next_move is None:
-        next_move = MOVE_MAPPING[actions[0]]
-    
-    print(f"MOVE {game_state['turn']}: {next_move}")
-    return {"move": next_move}
+    print(f"MOVE {game_state['turn']}: {action}")
+    return {"move": action}
 
 
 # Start server when `python main.py` is run

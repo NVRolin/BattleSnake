@@ -7,7 +7,7 @@ from gym.env import *
 
 if __name__ == "__main__":
     device = torch.device('cuda')
-    path = "./rl/models/experiments/"
+    path = "./models/experiments/"
     seed = None
     np.random.seed(seed)
 
@@ -16,24 +16,24 @@ if __name__ == "__main__":
     n_actions = len(env.ACTIONS)
 
     base_params = {
-        'n_episodes': 100,
+        'n_episodes': 2000,
         'n_steps': 0,
         'input_size': 13,
         'buffer_size': 10000,
         'hidden_size': 512,
         'output_size': 4,
         'device': "cuda",
-        'discount_factor': 0.999,
+        'discount_factor': 0.99,
         'n_ep_running_average': 10,
-        'alpha': 0.004,
+        'alpha': 0.001,
         'target_network_update_freq': 50,
-        'batch_size': 32,
+        'batch_size': 256,
         'eps_min': 0.1,
         'eps_max': 1,
         'n_frames': 13,
         'times_tested': 1,
-        'friendly_model': "./rl/models/experiments/_7",
-        'enemy_model': "./rl/models/experiments/_7",
+        'friendly_model': "./models/experiments/_7",
+        'enemy_model': "./models/experiments/_7",
         'env': env_name,
         'seed': seed
     }
