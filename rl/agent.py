@@ -599,3 +599,40 @@ def load_dqn_agent(dir_path, env, old_model=False):
 
     print("Model loaded successfully!")
     return dqn_agent
+
+
+def load_dqn_replit(dir_path, env, old_model=False):
+    if not os.path.isdir(dir_path):
+        raise Exception(f"Invalid path for model: {dir_path}")
+
+    # load parameters
+    params_file = os.path.join(dir_path, 'parameters.json')
+    with open(params_file, 'r') as f:
+        params = json.load(f)
+
+    # Get action space size from environment
+    n_actions = len(env.ACTIONS)
+
+    device = torch.device("cpu")
+
+    # create the network with the saved parameters
+    if old_model:
+        main_network = DQNetworkCNN(params['output_size'], params['input_size'], params['hidden_size'], device)
+    else:
+        main_network = DQNModel(params['output_size'], params['input_size'], params['hidden_size'], device)
+    main_network = main_network.to(device)
+
+    # init the optimizer and agent
+    optimizer = optim.RMSprop(main_network.parameters(), lr=params['lr'])
+    dqn_agent = DQNAgent(params['discount_factor'], params['buffer_size'], main_network, optimizer, n_actions,
+                         params['n_frames'])
+
+    # load the saved model weights
+    checkpoint = torch.load(os.path.join(dir_path, 'model.pt'), map_location=device)
+    dqn_agent._nn.load_state_dict(checkpoint['neural_network_state_dict'])
+
+    # set the parameters
+    dqn_agent._params_used = params
+
+    print("Model loaded successfully!")
+    return dqn_agent
