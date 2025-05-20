@@ -286,6 +286,20 @@ class DQNAgent():
                     risky_actions[i] = True
                     break
 
+        # # block moves leading to confined spaces (wip)
+        # for i, (y, x) in enumerate(move_cells):
+        #     if blocked_actions[i]:
+        #         continue
+                
+        #     free_spaces = 0
+        #     for adj_y, adj_x in [(max(y-1, 0), x), (min(y+1, H-1), x), (y, max(x-1, 0)), (y, min(x+1, W-1))]:
+        #         # check if position is in bounds and not a body part
+        #         if adj_y >= 0 and adj_y < H and adj_x >= 0 and adj_x < W and body_layer[adj_y, adj_x] != 1:
+        #             free_spaces += 1
+                    
+        #     if free_spaces < 2:
+        #         blocked_actions[i] = True
+
         # convert boolean masks to torch tensors
         blocked_mask = torch.tensor(blocked_actions, dtype=torch.bool, device=self._nn.get_device())
         risky_mask = torch.tensor(risky_actions, dtype=torch.bool, device=self._nn.get_device())

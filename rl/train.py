@@ -16,7 +16,7 @@ if __name__ == "__main__":
     n_actions = len(env.ACTIONS)
 
     base_params = {
-        'n_episodes': 5000,
+        'n_episodes': 15000,
         'n_steps': 0,
         'input_size': 13,
         'buffer_size': 100000,
@@ -26,14 +26,14 @@ if __name__ == "__main__":
         'discount_factor': 0.99,
         'n_ep_running_average': 10,
         'alpha': 0.001,
-        'target_network_update_freq': 50,
+        'target_network_update_freq': 100,
         'batch_size': 256,
         'eps_min': 0.1,
         'eps_max': 1,
         'n_frames': 13,
         'times_tested': 1,
-        'friendly_model': "./rl/models/candidates/_00",
-        'enemy_model': "./rl/models/candidates/_00",
+        'friendly_model': "./rl/models/candidates/_04",
+        'enemy_model': "./rl/models/candidates/_04",
         'env': env_name,
         'seed': seed
     }

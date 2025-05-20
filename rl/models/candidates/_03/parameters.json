@@ -1,0 +1,23 @@
+{
+    "buffer_size": 50000,
+    "n_frames": 13,
+    "discount_factor": 0.99,
+    "n_actions": 4,
+    "device": "cuda",
+    "lr": 0.002,
+    "input_size": 13,
+    "hidden_size": 512,
+    "output_size": 4,
+    "n_episodes": 2500,
+    "n_ep_running_average": 10,
+    "target_network_update_freq": 50,
+    "batch_size": 256,
+    "eps_min": 0.1,
+    "eps_max": 1,
+    "times_tested": 1,
+    "friendly_model": "./rl/models/candidates/_02",
+    "env_name": "Battlesnake",
+    "start_time": "2025-05-19 23:08:48",
+    "total_steps": 109173,
+    "end_time": "2025-05-19 23:44:28"
+}

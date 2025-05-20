@@ -15,7 +15,7 @@ MOVE_MAPPING = ["up", "down", "left", "right"]
 
 
 def load_model():
-    model_path = "rl/models/candidates/_02"
+    model_path = "rl/models/candidates/_04"
 
     assert os.path.exists(model_path), "No model found in rl/models/candidates"
 
@@ -140,7 +140,6 @@ def start(game_state: typing.Dict):
     player_ids = [snake["id"] for snake in game_state["board"]["snakes"] if snake["id"] != game_state["you"]["id"]]
 
     RL_MODEL = load_model()
-    print(RL_MODEL)
 
 
 # end is called when your Battlesnake finishes a game
@@ -163,7 +162,7 @@ def move(game_state: typing.Dict) -> typing.Dict:
     head_x, head_y = my_snake["head"]["x"], my_snake["head"]["y"]
 
     action = RL_MODEL._forward(state, 0, (head_x, abs(head_y - 10)), state_tensor)
-    print(str(game_state['turn']) + "|" + str(state[6]) + "|" + str((head_x, abs(head_y - 10))))
+    
     print(f"MOVE {game_state['turn']}: {MOVE_MAPPING[action]}")
     return {"move": MOVE_MAPPING[action]}
 
